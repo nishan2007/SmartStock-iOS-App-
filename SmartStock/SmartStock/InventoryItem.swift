@@ -19,7 +19,11 @@ struct InventoryItem: Identifiable, Hashable {
     let locationId: Int
     let locationName: String
     let categoryName: String?
+    let vendorName: String?
     let itemDescription: String?
+    let productType: ProductType
+    let costPrice: Decimal?
+    let imageURL: URL?
     let updatedAt: Date?
 
     init(
@@ -34,7 +38,11 @@ struct InventoryItem: Identifiable, Hashable {
         locationId: Int,
         locationName: String,
         categoryName: String? = nil,
+        vendorName: String? = nil,
         itemDescription: String? = nil,
+        productType: ProductType = .inventory,
+        costPrice: Decimal? = nil,
+        imageURL: URL? = nil,
         updatedAt: Date? = nil
     ) {
         self.productId = productId
@@ -48,11 +56,16 @@ struct InventoryItem: Identifiable, Hashable {
         self.locationId = locationId
         self.locationName = locationName
         self.categoryName = categoryName
+        self.vendorName = vendorName
         self.itemDescription = itemDescription
+        self.productType = productType
+        self.costPrice = costPrice
+        self.imageURL = imageURL
         self.updatedAt = updatedAt
     }
 
     var status: InventoryStockStatus {
+        guard productType == .inventory else { return .notTracked }
         if quantity < 0 { return .negative }
         if quantity == 0 { return .outOfStock }
         if quantity <= reorderLevel { return .lowStock }
@@ -69,6 +82,19 @@ struct InventoryItem: Identifiable, Hashable {
 
     var quantityText: String { "\(quantity)" }
     var reorderLevelText: String { "\(reorderLevel)" }
+
+    var formattedCostPrice: String {
+        guard let costPrice else { return "—" }
+        return InventoryItem.currencyFormatter.string(from: costPrice as NSDecimalNumber) ?? "$0.00"
+    }
+
+    private static let currencyFormatter: NumberFormatter = {
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .currency
+        formatter.maximumFractionDigits = 2
+        formatter.minimumFractionDigits = 2
+        return formatter
+    }()
 }
 
 enum InventoryStockStatus: String, CaseIterable, Hashable {
@@ -76,4 +102,29 @@ enum InventoryStockStatus: String, CaseIterable, Hashable {
     case lowStock = "Low Stock"
     case outOfStock = "Out of Stock"
     case negative = "Negative"
+    case notTracked = "Not Tracked"
+}
+
+enum ProductType: String, CaseIterable, Identifiable, Codable, Hashable {
+    case inventory = "INVENTORY"
+    case service = "SERVICE"
+    case nonInventory = "NON_INVENTORY"
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .inventory:
+            return "Inventory"
+        case .service:
+            return "Service"
+        case .nonInventory:
+            return "Non Inventory"
+        }
+    }
+
+    static func fromDatabaseValue(_ value: String?) -> ProductType {
+        guard let value else { return .inventory }
+        return ProductType(rawValue: value.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()) ?? .inventory
+    }
 }

@@ -8,7 +8,10 @@
 import SwiftUI
 
 struct InventoryView: View {
+    @EnvironmentObject private var sessionManager: SessionManager
     @StateObject private var viewModel = InventoryViewModel()
+    @State private var isShowingNewItem = false
+    @State private var isShowingScanner = false
 
     var body: some View {
         NavigationStack {
@@ -38,7 +41,11 @@ struct InventoryView: View {
                             LazyVStack(spacing: 12) {
                                 ForEach(viewModel.filteredItems) { item in
                                     NavigationLink {
-                                        InventoryDetailView(item: item)
+                                        InventoryDetailView(item: item) {
+                                            Task {
+                                                await viewModel.refresh(locationId: sessionManager.selectedStore?.id)
+                                            }
+                                        }
                                     } label: {
                                         InventoryRowView(item: item)
                                     }
@@ -49,15 +56,49 @@ struct InventoryView: View {
                         .padding()
                     }
                     .refreshable {
-                        await viewModel.refresh()
+                        await viewModel.refresh(locationId: sessionManager.selectedStore?.id)
                     }
                 }
             }
             .navigationTitle("Inventory")
+            .toolbar {
+                ToolbarItemGroup(placement: .topBarTrailing) {
+                    Button {
+                        isShowingScanner = true
+                    } label: {
+                        Image(systemName: "barcode.viewfinder")
+                    }
+                    .accessibilityLabel("Scan barcode")
+
+                    Button {
+                        isShowingNewItem = true
+                    } label: {
+                        Image(systemName: "plus.circle.fill")
+                    }
+                    .accessibilityLabel("Add item")
+                }
+            }
             .searchable(text: $viewModel.searchText, prompt: "Search by item, SKU, barcode, store...")
+            .sheet(isPresented: $isShowingScanner) {
+                BarcodeScannerSheet(
+                    scannedCode: $viewModel.searchText,
+                    isPresented: $isShowingScanner,
+                    onScanned: { code in
+                        viewModel.searchText = code.trimmingCharacters(in: .whitespacesAndNewlines)
+                    }
+                )
+            }
+            .sheet(isPresented: $isShowingNewItem) {
+                InventoryItemFormView(mode: .add, defaultStore: sessionManager.selectedStore) {
+                    Task {
+                        await viewModel.refresh(locationId: sessionManager.selectedStore?.id)
+                    }
+                }
+                .environmentObject(sessionManager)
+            }
             .task {
                 if viewModel.items.isEmpty {
-                    await viewModel.loadInventory()
+                    await viewModel.loadInventory(locationId: sessionManager.selectedStore?.id)
                 }
             }
         }
@@ -65,9 +106,9 @@ struct InventoryView: View {
 
     private var summaryCards: some View {
         HStack(spacing: 12) {
-            summaryCard(title: "Items", value: "\(viewModel.totalItemsCount)", systemImage: "shippingbox")
-            summaryCard(title: "Low Stock", value: "\(viewModel.lowStockCount)", systemImage: "exclamationmark.circle")
-            summaryCard(title: "Out", value: "\(viewModel.outOfStockCount)", systemImage: "xmark.circle")
+            summaryCard(title: "Items", value: "\(viewModel.totalItemsCount)", systemImage: "shippingbox", tint: .blue)
+            summaryCard(title: "Low Stock", value: "\(viewModel.lowStockCount)", systemImage: "exclamationmark.circle", tint: .orange)
+            summaryCard(title: "Out", value: "\(viewModel.outOfStockCount)", systemImage: "xmark.circle", tint: .red)
         }
     }
 
@@ -103,10 +144,11 @@ struct InventoryView: View {
         }
     }
 
-    private func summaryCard(title: String, value: String, systemImage: String) -> some View {
+    private func summaryCard(title: String, value: String, systemImage: String, tint: Color) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             Image(systemName: systemImage)
                 .font(.headline)
+                .foregroundStyle(tint)
 
             Text(value)
                 .font(.title3.weight(.bold))
@@ -117,8 +159,14 @@ struct InventoryView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding()
-        .background(Color(.secondarySystemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .background(
+            LinearGradient(
+                colors: [tint.opacity(0.16), Color(.secondarySystemBackground)],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
 
     private func filterChip(title: String, isSelected: Bool, action: @escaping () -> Void) -> some View {

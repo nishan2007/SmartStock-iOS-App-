@@ -82,12 +82,15 @@ final class InventoryViewModel: ObservableObject {
         .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
     }
 
-    func loadInventory() async {
+    func loadInventory(locationId: Int? = nil) async {
         isLoading = true
         errorMessage = nil
 
         do {
-            items = try await service.fetchInventory()
+            items = try await service.fetchInventory(for: locationId)
+            if let locationId {
+                selectedLocationId = locationId
+            }
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -95,8 +98,8 @@ final class InventoryViewModel: ObservableObject {
         isLoading = false
     }
 
-    func refresh() async {
-        await loadInventory()
+    func refresh(locationId: Int? = nil) async {
+        await loadInventory(locationId: locationId)
     }
 
     func selectAllLocations() {
@@ -113,6 +116,8 @@ final class InventoryViewModel: ObservableObject {
             return 2
         case .inStock:
             return 3
+        case .notTracked:
+            return 4
         }
     }
 }

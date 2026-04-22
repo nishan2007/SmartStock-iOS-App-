@@ -31,6 +31,8 @@ struct InventoryStatusBadge: View {
             return .red
         case .negative:
             return .orange
+        case .notTracked:
+            return .blue
         }
     }
 
@@ -44,6 +46,8 @@ struct InventoryStatusBadge: View {
             return Color.red.opacity(0.14)
         case .negative:
             return Color.orange.opacity(0.18)
+        case .notTracked:
+            return Color.blue.opacity(0.14)
         }
     }
 }

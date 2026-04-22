@@ -28,9 +28,13 @@ struct InventoryService {
                         name,
                         sku,
                         barcode,
+                        cost_price,
                         price,
                         description,
-                        category:categories(name)
+                        product_type,
+                        image_url,
+                        category:categories(name),
+                        vendor:vendors(name)
                     ),
                     location:locations!inner(
                         name
@@ -58,9 +62,13 @@ struct InventoryService {
                         name,
                         sku,
                         barcode,
+                        cost_price,
                         price,
                         description,
-                        category:categories(name)
+                        product_type,
+                        image_url,
+                        category:categories(name),
+                        vendor:vendors(name)
                     ),
                     location:locations!inner(
                         name
@@ -100,7 +108,11 @@ private struct InventoryRowDTO: Decodable {
             locationId: location_id,
             locationName: location.name,
             categoryName: product.category?.name,
+            vendorName: product.vendor?.name,
             itemDescription: product.description,
+            productType: ProductType.fromDatabaseValue(product.product_type),
+            costPrice: product.cost_price,
+            imageURL: URL(string: product.image_url ?? ""),
             updatedAt: InventoryRowDTO.iso8601Date(from: updated_at)
         )
     }
@@ -125,12 +137,20 @@ private struct ProductDTO: Decodable {
     let name: String
     let sku: String
     let barcode: String?
+    let cost_price: Decimal?
     let price: Decimal
     let description: String?
+    let product_type: String?
+    let image_url: String?
     let category: CategoryDTO?
+    let vendor: VendorDTO?
 }
 
 private struct CategoryDTO: Decodable {
+    let name: String
+}
+
+private struct VendorDTO: Decodable {
     let name: String
 }
 

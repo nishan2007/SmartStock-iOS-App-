@@ -8,6 +8,7 @@ import SwiftUI
 
 struct MainMenuView: View {
     @EnvironmentObject var sessionManager: SessionManager
+    @State private var isShowingNewItem = false
 
     var user: AppUser? {
         sessionManager.currentUser
@@ -15,103 +16,180 @@ struct MainMenuView: View {
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 20) {
+            ScrollView {
+                VStack(spacing: 20) {
 
                 if let user {
-                    VStack(spacing: 4) {
-                        Text("Welcome, \(user.fullName)")
-                            .font(.title2)
+                    HStack {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("Welcome, \(user.fullName)")
+                                .font(.title2.weight(.bold))
 
-                        Text("Username: \(user.username)")
-                            .foregroundColor(.secondary)
+                            Text(sessionManager.selectedStore?.name ?? user.username)
+                                .foregroundColor(.secondary)
+                        }
+                        Spacer()
+                        Image(systemName: "sparkles")
+                            .font(.title2)
+                            .foregroundStyle(.orange)
                     }
+                    .padding()
+                    .background(
+                        LinearGradient(
+                            colors: [Color.mint.opacity(0.22), Color.cyan.opacity(0.18)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                 }
 
-                Spacer()
-
-                // MAIN BUTTONS
-                VStack(spacing: 16) {
-
-                    NavigationLink {
-                        MakeSaleView()
-                    } label: {
-                        HStack(spacing: 12) {
-                            Image(systemName: "cart")
-                                .font(.title3)
-                                .frame(width: 28)
-
-                            Text("Make Sale")
-                                .font(.headline)
-
-                            Spacer()
+                    LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 14) {
+                        NavigationLink {
+                            MakeSaleView()
+                        } label: {
+                            menuTile(title: "Make Sale", subtitle: "Scan and checkout", systemImage: "cart.fill", tint: .green)
                         }
-                        .padding()
-                        .frame(maxWidth: .infinity)
-                        .background(Color(.systemGray6))
-                        .cornerRadius(12)
-                    }
-                    .buttonStyle(.plain)
+                        .buttonStyle(.plain)
 
                     
-                    NavigationLink {
-                        ViewSalesView()
+                        NavigationLink {
+                            ViewSalesView()
+                        } label: {
+                            menuTile(title: "Sales", subtitle: "History and details", systemImage: "chart.line.uptrend.xyaxis", tint: .blue)
+                        }
+                        .buttonStyle(.plain)
+
+                        NavigationLink {
+                            ReturnsView()
+                        } label: {
+                            menuTile(title: "Returns", subtitle: "Refunds and exchanges", systemImage: "arrow.uturn.backward.circle.fill", tint: .red)
+                        }
+                        .buttonStyle(.plain)
+
+                        NavigationLink {
+                            EndOfDayView()
+                        } label: {
+                            menuTile(title: "End of Day", subtitle: "Closeout and notes", systemImage: "checkmark.seal.fill", tint: .indigo)
+                        }
+                        .buttonStyle(.plain)
+
+                        NavigationLink {
+                            CustomersView()
+                        } label: {
+                            menuTile(title: "Customers", subtitle: "Profiles and history", systemImage: "person.2.fill", tint: .teal)
+                        }
+                        .buttonStyle(.plain)
+
+                        NavigationLink {
+                            InventoryView()
+                        } label: {
+                            menuTile(title: "Inventory", subtitle: "Stock and pricing", systemImage: "shippingbox.fill", tint: .orange)
+                        }
+                        .buttonStyle(.plain)
+
+                        NavigationLink {
+                            ReceivingInventoryView()
+                        } label: {
+                            menuTile(title: "Receiving", subtitle: "POs and new stock", systemImage: "tray.and.arrow.down.fill", tint: .cyan)
+                        }
+                        .buttonStyle(.plain)
+
+                        NavigationLink {
+                            StoreTransferView()
+                        } label: {
+                            menuTile(title: "Store Transfer", subtitle: "Move stock", systemImage: "arrow.left.arrow.right.circle.fill", tint: .brown)
+                        }
+                        .buttonStyle(.plain)
+
+                        NavigationLink {
+                            EditItemView()
+                        } label: {
+                            menuTile(title: "Edit Item", subtitle: "Find and update", systemImage: "pencil.circle.fill", tint: .mint)
+                        }
+                        .buttonStyle(.plain)
+
+                        Button {
+                            isShowingNewItem = true
+                        } label: {
+                            menuTile(title: "New Item", subtitle: "Photo and barcode", systemImage: "plus.app.fill", tint: .pink)
+                        }
+                        .buttonStyle(.plain)
+
+                        NavigationLink {
+                            TimeClockView()
+                        } label: {
+                            menuTile(title: "Time Clock", subtitle: "Punch in or out", systemImage: "clock.fill", tint: .gray)
+                        }
+                        .buttonStyle(.plain)
+
+                        if user?.roleId == 1 {
+                            NavigationLink {
+                                EmployeesView()
+                            } label: {
+                                menuTile(title: "Employees", subtitle: "Roles and stores", systemImage: "person.3.fill", tint: .purple)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+
+                    Button {
+                        Task {
+                            await sessionManager.signOut()
+                        }
                     } label: {
-                        HStack(spacing: 12) {
-                            Image(systemName: "list.bullet")
-                                .font(.title3)
-                                .frame(width: 28)
-
-                            Text("View Sales")
-                                .font(.headline)
-
-                            Spacer()
-                        }
-                        .padding()
-                        .frame(maxWidth: .infinity)
-                        .background(Color(.systemGray6))
-                        .cornerRadius(12)
+                        Label("Log Out", systemImage: "rectangle.portrait.and.arrow.right")
+                            .frame(maxWidth: .infinity)
                     }
-                    .buttonStyle(.plain)
-
-                    NavigationLink {
-                        InventoryView()
-                    } label: {
-                        HStack(spacing: 12) {
-                            Image(systemName: "cube.box")
-                                .font(.title3)
-                                .frame(width: 28)
-
-                            Text("View Inventory")
-                                .font(.headline)
-
-                            Spacer()
-                        }
-                        .padding()
-                        .frame(maxWidth: .infinity)
-                        .background(Color(.systemGray6))
-                        .cornerRadius(12)
-                    }
-                    .buttonStyle(.plain)
-
-                    // Only show if admin/manager
-                    if user?.roleId == 1 {
-                        MenuButton(title: "Employees", systemImage: "person.3") {
-                            print("Go to Employee Management")
-                        }
-                    }
+                    .buttonStyle(.bordered)
+                    .foregroundColor(.red)
                 }
-
-                Spacer()
-
-                Button("Log Out") {
-                    Task {
-                        await sessionManager.signOut()
-                    }
-                }
-                .foregroundColor(.red)
+                .padding()
             }
-            .padding()
+            .background(
+                LinearGradient(
+                    colors: [Color.orange.opacity(0.10), Color.mint.opacity(0.08), Color(.systemBackground)],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+                .ignoresSafeArea()
+            )
             .navigationTitle("SmartStock")
+            .sheet(isPresented: $isShowingNewItem) {
+                InventoryItemFormView(mode: .add, defaultStore: sessionManager.selectedStore) {}
+                    .environmentObject(sessionManager)
+            }
         }
+    }
+
+    private func menuTile(title: String, subtitle: String, systemImage: String, tint: Color) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Image(systemName: systemImage)
+                .font(.title2.weight(.semibold))
+                .foregroundStyle(tint)
+                .frame(width: 38, height: 38)
+                .background(tint.opacity(0.14))
+                .clipShape(Circle())
+
+            Spacer(minLength: 4)
+
+            Text(title)
+                .font(.headline)
+                .foregroundStyle(.primary)
+                .lineLimit(1)
+
+            Text(subtitle)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(2)
+        }
+        .frame(maxWidth: .infinity, minHeight: 134, alignment: .topLeading)
+        .padding()
+        .background(Color(.systemBackground).opacity(0.92))
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(tint.opacity(0.22), lineWidth: 1)
+        )
     }
 }

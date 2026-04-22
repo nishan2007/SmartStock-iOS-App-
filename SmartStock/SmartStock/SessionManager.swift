@@ -12,6 +12,14 @@ import Combine
 
 private struct EmailLookupResult: Decodable {
     let email: String?
+    let authUserId: String?
+    let isActive: Bool?
+
+    enum CodingKeys: String, CodingKey {
+        case email
+        case authUserId = "auth_user_id"
+        case isActive = "is_active"
+    }
 }
 
 @MainActor
@@ -41,24 +49,45 @@ final class SessionManager: ObservableObject {
         defer { isLoading = false }
 
         do {
-            // Step 1: find email from username
-            let results: [EmailLookupResult] = try await supabase
-                .from("users")
-                .select("email")
-                .ilike("username", pattern: username)
-                .limit(1)
-                .execute()
-                .value
+            let usernameOrEmail = username.trimmingCharacters(in: .whitespacesAndNewlines)
+            let password = password.trimmingCharacters(in: .whitespacesAndNewlines)
 
-            guard let email = results.first?.email,
-                  !email.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-                errorMessage = "User not found"
+            guard !usernameOrEmail.isEmpty, !password.isEmpty else {
+                errorMessage = "Enter username/email and password."
                 return false
             }
 
-            // Step 2: login using email
+            let email: String
+            if usernameOrEmail.contains("@") {
+                // With RLS enabled, unauthenticated users may not be able to read the users table.
+                // Email login can go directly through Supabase Auth and load the profile afterward.
+                email = usernameOrEmail
+            } else {
+                // Username login needs a pre-auth username -> email lookup. This only works if the
+                // database exposes a narrow lookup policy/RPC/function for unauthenticated clients.
+                let results = try await lookupLoginUser(usernameOrEmail)
+
+                guard let matchedEmail = results.first?.email,
+                      !matchedEmail.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                    errorMessage = "User not found. Try logging in with your email address."
+                    return false
+                }
+
+                if results.first?.isActive == false {
+                    errorMessage = "This employee account is inactive."
+                    return false
+                }
+
+                if results.first?.authUserId?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false {
+                    errorMessage = "This employee does not have a linked auth account yet."
+                    return false
+                }
+
+                email = matchedEmail
+            }
+
             try await supabase.auth.signIn(
-                email: email,
+                email: email.trimmingCharacters(in: .whitespacesAndNewlines),
                 password: password
             )
 
@@ -78,6 +107,13 @@ final class SessionManager: ObservableObject {
             errorMessage = error.localizedDescription
             return false
         }
+    }
+
+    private func lookupLoginUser(_ usernameOrEmail: String) async throws -> [EmailLookupResult] {
+        return try await supabase
+            .rpc("lookup_login_user", params: ["identifier": usernameOrEmail])
+            .execute()
+            .value
     }
 
     func signOut() async {

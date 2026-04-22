@@ -13,6 +13,10 @@ struct InventoryRowView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .top, spacing: 12) {
+                productImage
+                    .frame(width: 54, height: 54)
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+
                 VStack(alignment: .leading, spacing: 4) {
                     Text(item.name)
                         .font(.headline)
@@ -40,9 +44,11 @@ struct InventoryRowView: View {
             }
 
             HStack {
-                metricView(title: "Qty", value: item.quantityText)
+                metricView(title: "Qty", value: item.productType == .inventory ? item.quantityText : "—")
                 Spacer()
-                metricView(title: "Reorder", value: item.reorderLevelText)
+                metricView(title: "Reorder", value: item.productType == .inventory ? item.reorderLevelText : "—")
+                Spacer()
+                metricView(title: "Type", value: item.productType.displayName)
                 Spacer()
                 metricView(title: "Price", value: item.formattedPrice)
             }
@@ -63,11 +69,35 @@ struct InventoryRowView: View {
         .padding()
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(rowBackground)
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .stroke(borderColor.opacity(0.35), lineWidth: 1)
         )
+    }
+
+    @ViewBuilder
+    private var productImage: some View {
+        if let imageURL = item.imageURL {
+            AsyncImage(url: imageURL) { phase in
+                switch phase {
+                case .success(let image):
+                    image.resizable().scaledToFill()
+                default:
+                    placeholderImage
+                }
+            }
+        } else {
+            placeholderImage
+        }
+    }
+
+    private var placeholderImage: some View {
+        ZStack {
+            Color.white.opacity(0.65)
+            Image(systemName: "shippingbox.fill")
+                .foregroundStyle(.secondary)
+        }
     }
 
     @ViewBuilder
@@ -92,6 +122,8 @@ struct InventoryRowView: View {
             return Color.red.opacity(0.10)
         case .negative:
             return Color.orange.opacity(0.14)
+        case .notTracked:
+            return Color.blue.opacity(0.10)
         }
     }
 
@@ -105,6 +137,8 @@ struct InventoryRowView: View {
             return .red
         case .negative:
             return .orange
+        case .notTracked:
+            return .blue
         }
     }
 }

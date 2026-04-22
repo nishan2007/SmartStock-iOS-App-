@@ -8,9 +8,12 @@
 import Foundation
 import Supabase
 
+let supabaseURL = URL(string: "https://wbffhygkttoaaodjcvuh.supabase.co")!
+let supabasePublishableKey = "sb_publishable_L0x8yZuH_fncrmnNPojWxA_ErICc_-K"
+
 let supabase = SupabaseClient(
-    supabaseURL: URL(string: "https://wbffhygkttoaaodjcvuh.supabase.co")!,
-    supabaseKey: "sb_publishable_L0x8yZuH_fncrmnNPojWxA_ErICc_-K",
+    supabaseURL: supabaseURL,
+    supabaseKey: supabasePublishableKey,
     options: SupabaseClientOptions(
         auth: SupabaseClientOptions.AuthOptions(
             autoRefreshToken: true
