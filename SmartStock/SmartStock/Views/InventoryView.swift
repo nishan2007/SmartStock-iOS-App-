@@ -79,12 +79,22 @@ struct InventoryView: View {
                 }
             }
             .searchable(text: $viewModel.searchText, prompt: "Search by item, SKU, barcode, store...")
+            .onSubmit(of: .search) {
+                Task {
+                    await viewModel.searchBarcode(viewModel.searchText)
+                }
+            }
+            .onChange(of: viewModel.searchText) {
+                viewModel.resolvedBarcodeProductId = nil
+            }
             .sheet(isPresented: $isShowingScanner) {
                 BarcodeScannerSheet(
                     scannedCode: $viewModel.searchText,
                     isPresented: $isShowingScanner,
                     onScanned: { code in
-                        viewModel.searchText = code.trimmingCharacters(in: .whitespacesAndNewlines)
+                        Task {
+                            await viewModel.searchBarcode(code)
+                        }
                     }
                 )
             }

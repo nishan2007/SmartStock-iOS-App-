@@ -13,6 +13,7 @@ struct InventoryItem: Identifiable, Hashable {
     let name: String
     let sku: String
     let barcode: String?
+    let additionalBarcodes: [String]
     let price: Decimal
     let quantity: Int
     let reorderLevel: Int
@@ -32,6 +33,7 @@ struct InventoryItem: Identifiable, Hashable {
         name: String,
         sku: String,
         barcode: String? = nil,
+        additionalBarcodes: [String] = [],
         price: Decimal,
         quantity: Int,
         reorderLevel: Int,
@@ -50,6 +52,7 @@ struct InventoryItem: Identifiable, Hashable {
         self.name = name
         self.sku = sku
         self.barcode = barcode
+        self.additionalBarcodes = additionalBarcodes
         self.price = price
         self.quantity = quantity
         self.reorderLevel = reorderLevel

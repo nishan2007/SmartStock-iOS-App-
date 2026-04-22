@@ -9,6 +9,33 @@ import Foundation
 import Supabase
 
 struct InventoryService {
+    func productId(forBarcode barcode: String) async throws -> Int? {
+        let trimmed = barcode.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+
+        let directMatches: [ProductBarcodeLookupDTO] = try await supabase
+            .from("products")
+            .select("product_id")
+            .or("barcode.eq.\(trimmed),sku.eq.\(trimmed)")
+            .limit(1)
+            .execute()
+            .value
+
+        if let productId = directMatches.first?.product_id {
+            return productId
+        }
+
+        let extraBarcodeMatches: [ProductBarcodeLookupDTO] = try await supabase
+            .from("product_barcodes")
+            .select("product_id")
+            .eq("barcode", value: trimmed)
+            .limit(1)
+            .execute()
+            .value
+
+        return extraBarcodeMatches.first?.product_id
+    }
+
     func fetchInventory(for locationId: Int? = nil) async throws -> [InventoryItem] {
         let rows: [InventoryRowDTO]
 
@@ -33,6 +60,7 @@ struct InventoryService {
                         description,
                         product_type,
                         image_url,
+                        product_barcodes(barcode),
                         category:categories(name),
                         vendor:vendors(name)
                     ),
@@ -67,6 +95,7 @@ struct InventoryService {
                         description,
                         product_type,
                         image_url,
+                        product_barcodes(barcode),
                         category:categories(name),
                         vendor:vendors(name)
                     ),
@@ -83,6 +112,10 @@ struct InventoryService {
 
         return rows.map { $0.toInventoryItem() }
     }
+}
+
+private struct ProductBarcodeLookupDTO: Decodable {
+    let product_id: Int
 }
 
 private struct InventoryRowDTO: Decodable {
@@ -102,6 +135,7 @@ private struct InventoryRowDTO: Decodable {
             name: product.name,
             sku: product.sku,
             barcode: product.barcode,
+            additionalBarcodes: product.product_barcodes.map(\.barcode),
             price: product.price,
             quantity: quantity_on_hand,
             reorderLevel: reorder_level,
@@ -142,8 +176,13 @@ private struct ProductDTO: Decodable {
     let description: String?
     let product_type: String?
     let image_url: String?
+    let product_barcodes: [ProductBarcodeDTO]
     let category: CategoryDTO?
     let vendor: VendorDTO?
+}
+
+private struct ProductBarcodeDTO: Decodable {
+    let barcode: String
 }
 
 private struct CategoryDTO: Decodable {

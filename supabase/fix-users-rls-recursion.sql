@@ -14,6 +14,7 @@
 begin;
 
 alter table public.users enable row level security;
+alter table public.product_barcodes enable row level security;
 
 create or replace function public.current_app_user_id()
 returns int
@@ -133,6 +134,7 @@ drop policy if exists "Admins can insert users" on public.users;
 drop policy if exists "Admins can update users" on public.users;
 drop policy if exists "Admins can delete users" on public.users;
 drop policy if exists "Users can read coworkers at assigned stores" on public.users;
+drop policy if exists "Users can read product barcodes at assigned stores" on public.product_barcodes;
 
 -- Authenticated users can load their own SmartStock profile after Supabase Auth
 -- login. Admin users can manage employees.
@@ -160,6 +162,22 @@ on public.users
 for delete
 to authenticated
 using (public.current_app_user_is_admin());
+
+create policy "Users can read product barcodes at assigned stores"
+on public.product_barcodes
+for select
+to authenticated
+using (
+  public.current_app_user_is_admin()
+  or exists (
+    select 1
+    from public.inventory i
+    where i.product_id = product_barcodes.product_id
+      and i.location_id in (
+        select location_id from public.current_app_user_location_ids()
+      )
+  )
+);
 
 commit;
 

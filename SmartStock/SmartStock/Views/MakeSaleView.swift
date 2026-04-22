@@ -420,15 +420,51 @@ struct MakeSaleView: View {
             let results: [Product] = try await supabase
                 .from("products")
                 .select("product_id, name, sku, price")
-                .ilike("name", pattern: "%\(trimmedSearch)%")
+                .or("name.ilike.%\(trimmedSearch)%,sku.ilike.%\(trimmedSearch)%,barcode.ilike.%\(trimmedSearch)%")
                 .limit(4)
                 .execute()
                 .value
 
             if Task.isCancelled { return }
 
+            if !results.isEmpty {
+                await MainActor.run {
+                    products = results
+                }
+                return
+            }
+
+            struct BarcodeMatch: Decodable {
+                let product_id: Int
+            }
+
+            let barcodeResults: [BarcodeMatch] = try await supabase
+                .from("product_barcodes")
+                .select("product_id")
+                .eq("barcode", value: trimmedSearch)
+                .limit(1)
+                .execute()
+                .value
+
+            guard let match = barcodeResults.first else {
+                await MainActor.run {
+                    products = []
+                }
+                return
+            }
+
+            let matchedProducts: [Product] = try await supabase
+                .from("products")
+                .select("product_id, name, sku, price")
+                .eq("product_id", value: match.product_id)
+                .limit(1)
+                .execute()
+                .value
+
+            if Task.isCancelled { return }
+
             await MainActor.run {
-                products = results
+                products = matchedProducts
             }
         } catch {
             if Task.isCancelled { return }

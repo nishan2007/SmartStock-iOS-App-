@@ -16,6 +16,7 @@ final class InventoryViewModel: ObservableObject {
     @Published var errorMessage: String?
     @Published var selectedStatus: InventoryStockStatus?
     @Published var selectedLocationId: Int?
+    @Published var resolvedBarcodeProductId: Int?
 
     private let service: InventoryService
 
@@ -38,7 +39,9 @@ final class InventoryViewModel: ObservableObject {
                         || item.quantityText.contains(query)
                         || item.reorderLevelText.contains(query)
                         || String(item.productId).contains(query)
+                        || item.productId == resolvedBarcodeProductId
                         || (item.barcode?.lowercased().contains(query) ?? false)
+                        || item.additionalBarcodes.contains { $0.lowercased().contains(query) }
                         || (item.categoryName?.lowercased().contains(query) ?? false)
                         || item.locationName.lowercased().contains(query)
                 }
@@ -100,6 +103,37 @@ final class InventoryViewModel: ObservableObject {
 
     func refresh(locationId: Int? = nil) async {
         await loadInventory(locationId: locationId)
+    }
+
+    func updateSearchText(_ text: String) {
+        searchText = text
+        resolvedBarcodeProductId = nil
+    }
+
+    func searchBarcode(_ barcode: String) async {
+        let trimmed = barcode.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            updateSearchText("")
+            return
+        }
+
+        searchText = trimmed
+        resolvedBarcodeProductId = nil
+        errorMessage = nil
+
+        if items.contains(where: { item in
+            item.sku.caseInsensitiveCompare(trimmed) == .orderedSame
+                || item.barcode?.caseInsensitiveCompare(trimmed) == .orderedSame
+                || item.additionalBarcodes.contains { $0.caseInsensitiveCompare(trimmed) == .orderedSame }
+        }) {
+            return
+        }
+
+        do {
+            resolvedBarcodeProductId = try await service.productId(forBarcode: trimmed)
+        } catch {
+            errorMessage = error.localizedDescription
+        }
     }
 
     func selectAllLocations() {
