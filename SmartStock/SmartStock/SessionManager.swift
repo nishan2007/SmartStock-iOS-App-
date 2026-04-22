@@ -137,7 +137,17 @@ final class SessionManager: ObservableObject {
             .execute()
             .value
 
-        currentUser = users.first
+        guard let user = users.first else {
+            currentUser = nil
+            return
+        }
+
+        if let roleId = user.roleId {
+            let permissions = try await RoleService.shared.fetchMobilePermissions(roleId: roleId)
+            currentUser = user.withMobilePermissions(permissions)
+        } else {
+            currentUser = user
+        }
     }
     
     func loadUserStores() async {

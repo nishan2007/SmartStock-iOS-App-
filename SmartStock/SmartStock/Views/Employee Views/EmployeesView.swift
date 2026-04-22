@@ -13,6 +13,7 @@
 import SwiftUI
 
 struct EmployeesView: View {
+    @EnvironmentObject private var sessionManager: SessionManager
     @StateObject private var viewModel = EmployeesViewModel()
 
     var body: some View {
@@ -65,10 +66,12 @@ struct EmployeesView: View {
         .searchable(text: $viewModel.searchText, prompt: "Search employees")
         .toolbar {
             ToolbarItemGroup(placement: .topBarTrailing) {
-                NavigationLink {
-                    RolePermissionsView()
-                } label: {
-                    Image(systemName: "person.badge.key")
+                if sessionManager.currentUser?.canAccess(.rolePermissions) == true {
+                    NavigationLink {
+                        RolePermissionsView()
+                    } label: {
+                        Image(systemName: "person.badge.key")
+                    }
                 }
 
                 NavigationLink {

@@ -45,85 +45,106 @@ struct MainMenuView: View {
                 }
 
                     LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 14) {
-                        NavigationLink {
-                            MakeSaleView()
-                        } label: {
-                            menuTile(title: "Make Sale", subtitle: "Scan and checkout", systemImage: "cart.fill", tint: .green)
+                        if canAccess(.makeSale) {
+                            NavigationLink {
+                                MakeSaleView()
+                            } label: {
+                                menuTile(title: "Make Sale", subtitle: "Scan and checkout", systemImage: "cart.fill", tint: .green)
+                            }
+                            .buttonStyle(.plain)
                         }
-                        .buttonStyle(.plain)
 
-                    
-                        NavigationLink {
-                            ViewSalesView()
-                        } label: {
-                            menuTile(title: "Sales", subtitle: "History and details", systemImage: "chart.line.uptrend.xyaxis", tint: .blue)
+                        if canAccess(.viewSales) {
+                            NavigationLink {
+                                ViewSalesView()
+                            } label: {
+                                menuTile(title: "Sales", subtitle: "History and details", systemImage: "chart.line.uptrend.xyaxis", tint: .blue)
+                            }
+                            .buttonStyle(.plain)
                         }
-                        .buttonStyle(.plain)
 
-                        NavigationLink {
-                            ReturnsView()
-                        } label: {
-                            menuTile(title: "Returns", subtitle: "Refunds and exchanges", systemImage: "arrow.uturn.backward.circle.fill", tint: .red)
+                        if canAccess(.returns) {
+                            NavigationLink {
+                                ReturnsView()
+                            } label: {
+                                menuTile(title: "Returns", subtitle: "Refunds and exchanges", systemImage: "arrow.uturn.backward.circle.fill", tint: .red)
+                            }
+                            .buttonStyle(.plain)
                         }
-                        .buttonStyle(.plain)
 
-                        NavigationLink {
-                            EndOfDayView()
-                        } label: {
-                            menuTile(title: "End of Day", subtitle: "Closeout and notes", systemImage: "checkmark.seal.fill", tint: .indigo)
+                        if canAccess(.endOfDay) {
+                            NavigationLink {
+                                EndOfDayView()
+                            } label: {
+                                menuTile(title: "End of Day", subtitle: "Closeout and notes", systemImage: "checkmark.seal.fill", tint: .indigo)
+                            }
+                            .buttonStyle(.plain)
                         }
-                        .buttonStyle(.plain)
 
-                        NavigationLink {
-                            CustomersView()
-                        } label: {
-                            menuTile(title: "Customers", subtitle: "Profiles and history", systemImage: "person.2.fill", tint: .teal)
+                        if canAccess(.customers) {
+                            NavigationLink {
+                                CustomersView()
+                            } label: {
+                                menuTile(title: "Customers", subtitle: "Profiles and history", systemImage: "person.2.fill", tint: .teal)
+                            }
+                            .buttonStyle(.plain)
                         }
-                        .buttonStyle(.plain)
 
-                        NavigationLink {
-                            InventoryView()
-                        } label: {
-                            menuTile(title: "Inventory", subtitle: "Stock and pricing", systemImage: "shippingbox.fill", tint: .orange)
+                        if canAccess(.inventory) {
+                            NavigationLink {
+                                InventoryView()
+                            } label: {
+                                menuTile(title: "Inventory", subtitle: "Stock and pricing", systemImage: "shippingbox.fill", tint: .orange)
+                            }
+                            .buttonStyle(.plain)
                         }
-                        .buttonStyle(.plain)
 
-                        NavigationLink {
-                            ReceivingInventoryView()
-                        } label: {
-                            menuTile(title: "Receiving", subtitle: "POs and new stock", systemImage: "tray.and.arrow.down.fill", tint: .cyan)
+                        if canAccess(.receiving) {
+                            NavigationLink {
+                                ReceivingInventoryView()
+                            } label: {
+                                menuTile(title: "Receiving", subtitle: "New stock", systemImage: "tray.and.arrow.down.fill", tint: .cyan)
+                            }
+                            .buttonStyle(.plain)
                         }
-                        .buttonStyle(.plain)
 
-                        NavigationLink {
-                            StoreTransferView()
-                        } label: {
-                            menuTile(title: "Store Transfer", subtitle: "Move stock", systemImage: "arrow.left.arrow.right.circle.fill", tint: .brown)
+                        if canAccess(.storeTransfer) {
+                            NavigationLink {
+                                StoreTransferView()
+                            } label: {
+                                menuTile(title: "Store Transfer", subtitle: "Move stock", systemImage: "arrow.left.arrow.right.circle.fill", tint: .brown)
+                            }
+                            .buttonStyle(.plain)
                         }
-                        .buttonStyle(.plain)
 
-                        NavigationLink {
-                            EditItemView()
-                        } label: {
-                            menuTile(title: "Edit Item", subtitle: "Find and update", systemImage: "pencil.circle.fill", tint: .mint)
+                        if canAccess(.editItem) {
+                            NavigationLink {
+                                EditItemView()
+                            } label: {
+                                menuTile(title: "Edit Item", subtitle: "Find and update", systemImage: "pencil.circle.fill", tint: .mint)
+                            }
+                            .buttonStyle(.plain)
                         }
-                        .buttonStyle(.plain)
 
-                        Button {
-                            isShowingNewItem = true
-                        } label: {
-                            menuTile(title: "New Item", subtitle: "Photo and barcode", systemImage: "plus.app.fill", tint: .pink)
+                        if canAccess(.newItem) {
+                            Button {
+                                isShowingNewItem = true
+                            } label: {
+                                menuTile(title: "New Item", subtitle: "Photo and barcode", systemImage: "plus.app.fill", tint: .pink)
+                            }
+                            .buttonStyle(.plain)
                         }
-                        .buttonStyle(.plain)
 
-                        NavigationLink {
-                            TimeClockView()
-                        } label: {
-                            menuTile(title: "Time Clock", subtitle: "Punch in or out", systemImage: "clock.fill", tint: .gray)
+                        if canAccess(.timeClock) {
+                            NavigationLink {
+                                TimeClockView()
+                            } label: {
+                                menuTile(title: "Time Clock", subtitle: "Punch in or out", systemImage: "clock.fill", tint: .gray)
+                            }
+                            .buttonStyle(.plain)
                         }
-                        .buttonStyle(.plain)
 
-                        if user?.roleId == 1 {
+                        if canAccess(.employees) {
                             NavigationLink {
                                 EmployeesView()
                             } label: {
@@ -160,6 +181,10 @@ struct MainMenuView: View {
                     .environmentObject(sessionManager)
             }
         }
+    }
+
+    private func canAccess(_ permission: MobilePermission) -> Bool {
+        user?.canAccess(permission) == true
     }
 
     private func menuTile(title: String, subtitle: String, systemImage: String, tint: Color) -> some View {
