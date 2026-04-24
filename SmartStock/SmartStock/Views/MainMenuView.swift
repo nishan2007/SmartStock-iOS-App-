@@ -126,11 +126,21 @@ struct MainMenuView: View {
                             .buttonStyle(.plain)
                         }
 
-                        if canAccess(.newItem) {
+                        if canAccess(.addNewItem) {
                             Button {
                                 isShowingNewItem = true
                             } label: {
                                 menuTile(title: "New Item", subtitle: "Photo and barcode", systemImage: "plus.app.fill", tint: .pink)
+                            }
+                            .buttonStyle(.plain)
+                        }
+
+                        if canAccess(.changeStore) {
+                            NavigationLink {
+                                StoreSelectionView()
+                                    .environmentObject(sessionManager)
+                            } label: {
+                                menuTile(title: "Change Store", subtitle: "Switch active location", systemImage: "storefront.circle.fill", tint: .yellow)
                             }
                             .buttonStyle(.plain)
                         }
@@ -152,6 +162,52 @@ struct MainMenuView: View {
                             }
                             .buttonStyle(.plain)
                         }
+
+                        if canAccess(.departmentManagement) {
+                            NavigationLink {
+                                DepartmentManagementView()
+                            } label: {
+                                menuTile(title: "Departments", subtitle: "Category management", systemImage: "square.grid.2x2.fill", tint: .cyan)
+                            }
+                            .buttonStyle(.plain)
+                        }
+
+                        if canAccess(.vendorManagement) || canAccess(.viewVendor) {
+                            NavigationLink {
+                                VendorManagementView()
+                            } label: {
+                                menuTile(title: "Vendors", subtitle: "Supplier records", systemImage: "building.2.fill", tint: .brown)
+                            }
+                            .buttonStyle(.plain)
+                        }
+
+                        if canAccess(.locationManagement) {
+                            NavigationLink {
+                                LocationManagementView()
+                            } label: {
+                                menuTile(title: "Locations", subtitle: "Store records", systemImage: "map.fill", tint: .red)
+                            }
+                            .buttonStyle(.plain)
+                        }
+
+                        if canAccess(.viewReceivingHistory) {
+                            NavigationLink {
+                                ReceivingHistoryView()
+                            } label: {
+                                menuTile(title: "Receiving History", subtitle: "Past receiving activity", systemImage: "clock.arrow.trianglehead.counterclockwise.rotate.90", tint: .teal)
+                            }
+                            .buttonStyle(.plain)
+                        }
+
+                        if canAccess(.viewReports) {
+                            NavigationLink {
+                                ReportsHubView()
+                                    .environmentObject(sessionManager)
+                            } label: {
+                                menuTile(title: "Reports", subtitle: "Summaries and history", systemImage: "chart.bar.doc.horizontal.fill", tint: .indigo)
+                            }
+                            .buttonStyle(.plain)
+                        }
                     }
 
                     Button {
@@ -164,6 +220,8 @@ struct MainMenuView: View {
                     }
                     .buttonStyle(.bordered)
                     .foregroundColor(.red)
+
+                    loginPersistenceCard
                 }
                 .padding()
             }
@@ -185,6 +243,54 @@ struct MainMenuView: View {
 
     private func canAccess(_ permission: MobilePermission) -> Bool {
         user?.canAccess(permission) == true
+    }
+
+    @ViewBuilder
+    private var loginPersistenceCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Label("Login Security", systemImage: "lock.shield")
+                .font(.headline)
+
+            if sessionManager.canManageDeviceReceiptSettings {
+                NavigationLink {
+                    DeviceReceiptSettingsView()
+                        .environmentObject(sessionManager)
+                } label: {
+                    Label("Local Device Settings", systemImage: "number.square")
+                }
+            }
+
+            if sessionManager.canManagePersistentLoginApproval {
+                NavigationLink {
+                    DeviceManagementView()
+                        .environmentObject(sessionManager)
+                } label: {
+                    Label("Device Management", systemImage: "iphone.badge.checkmark")
+                }
+
+                Text(sessionManager.allowsPersistentLogin
+                     ? "This device is approved to stay signed in."
+                     : "This device is currently treated as a shared device and will require login after the app closes.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            } else {
+                Text(sessionManager.currentDevice?.isBlocked == true
+                     ? "This device has been blocked."
+                     : sessionManager.allowsPersistentLogin
+                     ? "This device is approved to stay signed in."
+                     : "This device is in shared-device mode and will require login after the app closes.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding()
+        .background(Color(.systemBackground).opacity(0.92))
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(Color.blue.opacity(0.16), lineWidth: 1)
+        )
     }
 
     private func menuTile(title: String, subtitle: String, systemImage: String, tint: Color) -> some View {

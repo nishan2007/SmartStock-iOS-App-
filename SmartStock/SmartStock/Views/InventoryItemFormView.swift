@@ -122,6 +122,30 @@ struct InventoryItemFormView: View {
         }
     }
 
+    private var canAdjustInventoryQuantity: Bool {
+        sessionManager.currentUser?.canAccess(.adjustInventoryQuantity) == true
+    }
+
+    private var canEditInventoryFields: Bool {
+        switch viewModel.mode {
+        case .add:
+            return true
+        case .edit:
+            return canAdjustInventoryQuantity
+        }
+    }
+
+    private var isEditingItem: Bool {
+        if case .edit = viewModel.mode {
+            return true
+        }
+        return false
+    }
+
+    private var canViewCostPrice: Bool {
+        sessionManager.currentUser?.canAccess(.viewCostPrice) == true
+    }
+
     private var hero: some View {
         HStack(spacing: 14) {
             ZStack {
@@ -162,8 +186,10 @@ struct InventoryItemFormView: View {
 
     private var pricingSection: some View {
         formSection(title: "Pricing", tint: .green, systemImage: "dollarsign.circle.fill") {
-            TextField("Cost price", text: $viewModel.draft.costPrice)
-                .keyboardType(.decimalPad)
+            if canViewCostPrice {
+                TextField("Cost price", text: $viewModel.draft.costPrice)
+                    .keyboardType(.decimalPad)
+            }
             TextField("Sale price", text: $viewModel.draft.price)
                 .keyboardType(.decimalPad)
             Picker("Item type", selection: $viewModel.draft.productType) {
@@ -179,16 +205,41 @@ struct InventoryItemFormView: View {
     private var inventorySection: some View {
         formSection(title: "Stock", tint: .orange, systemImage: "chart.bar.fill") {
             if viewModel.draft.isInventoryItem {
-                Picker("Store", selection: $viewModel.draft.locationId) {
-                    Text("Choose Store").tag(Int?.none)
-                    ForEach(viewModel.stores) { store in
-                        Text(store.name).tag(Int?.some(store.id))
-                    }
+                if isEditingItem {
+                    LabeledContent("Store", value: sessionManager.selectedStore?.name ?? viewModel.stores.first(where: { $0.id == viewModel.draft.locationId })?.name ?? "Current Store")
                 }
-                TextField("Quantity", text: $viewModel.draft.quantity)
-                    .keyboardType(.numberPad)
-                TextField("Reorder level", text: $viewModel.draft.reorderLevel)
-                    .keyboardType(.numberPad)
+
+                if canEditInventoryFields {
+                    if !isEditingItem {
+                        Picker("Store", selection: $viewModel.draft.locationId) {
+                            Text("Choose Store").tag(Int?.none)
+                            ForEach(viewModel.stores) { store in
+                                Text(store.name).tag(Int?.some(store.id))
+                            }
+                        }
+                    }
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Quantity")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                        TextField("Quantity", text: $viewModel.draft.quantity)
+                            .keyboardType(.numberPad)
+                            .textFieldStyle(.roundedBorder)
+                    }
+
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Reorder Level")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                        TextField("Reorder level", text: $viewModel.draft.reorderLevel)
+                            .keyboardType(.numberPad)
+                            .textFieldStyle(.roundedBorder)
+                    }
+                } else {
+                    Label("Manual quantity changes in Edit Item require the Adjust Inventory Quantity permission.", systemImage: "lock.fill")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
             } else {
                 Label("Services and non-inventory items do not track quantity.", systemImage: "info.circle")
                     .font(.subheadline)
@@ -199,19 +250,35 @@ struct InventoryItemFormView: View {
 
     private var organizationSection: some View {
         formSection(title: "Organization", tint: .purple, systemImage: "folder.fill") {
-            Picker("Department", selection: $viewModel.draft.categoryId) {
-                Text("None").tag(Int?.none)
-                ForEach(viewModel.departments) { department in
-                    Text(department.name).tag(Int?.some(department.id))
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Department")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                Picker("Department", selection: $viewModel.draft.categoryId) {
+                    Text("None").tag(Int?.none)
+                    ForEach(viewModel.departments) { department in
+                        Text(department.name).tag(Int?.some(department.id))
+                    }
                 }
+                .pickerStyle(.menu)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
 
-            Picker("Vendor", selection: $viewModel.draft.vendorId) {
-                Text("None").tag(Int?.none)
-                ForEach(viewModel.vendors) { vendor in
-                    Text(vendor.name).tag(Int?.some(vendor.id))
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Vendor")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                Picker("Vendor", selection: $viewModel.draft.vendorId) {
+                    Text("None").tag(Int?.none)
+                    ForEach(viewModel.vendors) { vendor in
+                        Text(vendor.name).tag(Int?.some(vendor.id))
+                    }
                 }
+                .pickerStyle(.menu)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 

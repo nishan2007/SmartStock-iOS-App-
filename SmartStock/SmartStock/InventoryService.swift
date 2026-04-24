@@ -58,6 +58,7 @@ struct InventoryService {
                         cost_price,
                         price,
                         description,
+                        created_by_name,
                         product_type,
                         image_url,
                         product_barcodes(barcode),
@@ -93,6 +94,7 @@ struct InventoryService {
                         cost_price,
                         price,
                         description,
+                        created_by_name,
                         product_type,
                         image_url,
                         product_barcodes(barcode),
@@ -111,6 +113,46 @@ struct InventoryService {
         }
 
         return rows.map { $0.toInventoryItem() }
+    }
+
+    func fetchInventoryItem(productId: Int, locationId: Int) async throws -> InventoryItem? {
+        let rows: [InventoryRowDTO] = try await supabase
+            .from("inventory")
+            .select(
+                """
+                inventory_id,
+                product_id,
+                location_id,
+                quantity_on_hand,
+                reorder_level,
+                updated_at,
+                product:products!inner(
+                    product_id,
+                    name,
+                    sku,
+                    barcode,
+                    cost_price,
+                    price,
+                    description,
+                    created_by_name,
+                    product_type,
+                    image_url,
+                    product_barcodes(barcode),
+                    category:categories(name),
+                    vendor:vendors(name)
+                ),
+                location:locations!inner(
+                    name
+                )
+                """
+            )
+            .eq("product_id", value: productId)
+            .eq("location_id", value: locationId)
+            .limit(1)
+            .execute()
+            .value
+
+        return rows.first?.toInventoryItem()
     }
 }
 
@@ -143,6 +185,7 @@ private struct InventoryRowDTO: Decodable {
             locationName: location.name,
             categoryName: product.category?.name,
             vendorName: product.vendor?.name,
+            createdByName: product.created_by_name,
             itemDescription: product.description,
             productType: ProductType.fromDatabaseValue(product.product_type),
             costPrice: product.cost_price,
@@ -174,6 +217,7 @@ private struct ProductDTO: Decodable {
     let cost_price: Decimal?
     let price: Decimal
     let description: String?
+    let created_by_name: String?
     let product_type: String?
     let image_url: String?
     let product_barcodes: [ProductBarcodeDTO]

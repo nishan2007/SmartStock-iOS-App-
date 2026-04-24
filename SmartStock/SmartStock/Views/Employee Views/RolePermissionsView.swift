@@ -76,7 +76,7 @@ struct RolePermissionsView: View {
 
     private var groupedPermissions: [(title: String, permissions: [MobilePermission])] {
         let grouped = Dictionary(grouping: MobilePermission.allCases, by: \.groupTitle)
-        let order = ["Sales", "Inventory", "Employee", "Admin"]
+        let order = ["Sales", "Inventory", "Operations", "Employee", "Device", "Admin"]
 
         return order.compactMap { title in
             guard let permissions = grouped[title] else { return nil }

@@ -8,6 +8,7 @@ import SwiftUI
 import Supabase
 
 struct ContentView: View {
+    @Environment(\.scenePhase) private var scenePhase
     @StateObject private var sessionManager = SessionManager()
 
     var body: some View {
@@ -27,6 +28,9 @@ struct ContentView: View {
         }
         .task {
             await sessionManager.restoreSession()
+        }
+        .onChange(of: scenePhase) { _, newPhase in
+            sessionManager.handleScenePhaseChange(newPhase)
         }
     }
 }

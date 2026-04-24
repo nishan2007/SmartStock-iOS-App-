@@ -61,6 +61,6 @@ struct AppUser: Decodable, Identifiable {
     }
 
     func canAccess(_ permission: MobilePermission) -> Bool {
-        roleId == 1 || mobilePermissions.contains(permission)
+        mobilePermissions.contains(permission)
     }
 }

@@ -21,6 +21,7 @@ struct InventoryItem: Identifiable, Hashable {
     let locationName: String
     let categoryName: String?
     let vendorName: String?
+    let createdByName: String?
     let itemDescription: String?
     let productType: ProductType
     let costPrice: Decimal?
@@ -41,6 +42,7 @@ struct InventoryItem: Identifiable, Hashable {
         locationName: String,
         categoryName: String? = nil,
         vendorName: String? = nil,
+        createdByName: String? = nil,
         itemDescription: String? = nil,
         productType: ProductType = .inventory,
         costPrice: Decimal? = nil,
@@ -60,6 +62,7 @@ struct InventoryItem: Identifiable, Hashable {
         self.locationName = locationName
         self.categoryName = categoryName
         self.vendorName = vendorName
+        self.createdByName = createdByName
         self.itemDescription = itemDescription
         self.productType = productType
         self.costPrice = costPrice

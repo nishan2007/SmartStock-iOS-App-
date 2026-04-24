@@ -16,14 +16,24 @@ struct SaleLocation: Decodable {
     let name: String?
 }
 
+struct SaleCustomerAccount: Decodable {
+    let name: String?
+}
+
 struct Sale: Decodable, Identifiable {
     let sale_id: Int
     let total_amount: Double?
     let status: String?
     let transaction_source: String?
     let created_at: String?
+    let payment_status: String?
+    let returned_amount: Double?
+    let receipt_number: String?
+    let receipt_device_id: String?
+    let receipt_sequence: Int?
     let users: SaleUser?
     let locations: SaleLocation?
+    let customer_accounts: SaleCustomerAccount?
 
     var id: Int { sale_id }
 
@@ -37,6 +47,24 @@ struct Sale: Decodable, Identifiable {
 
     var totalText: String {
         String(format: "$%.2f", total_amount ?? 0)
+    }
+
+    var returnedAmountText: String {
+        String(format: "$%.2f", returned_amount ?? 0)
+    }
+
+    var hasReturns: Bool {
+        (returned_amount ?? 0) > 0
+    }
+
+    var paymentStatusText: String {
+        let trimmed = payment_status?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return trimmed.isEmpty ? "Unknown" : trimmed.replacingOccurrences(of: "_", with: " ").capitalized
+    }
+
+    var receiptNumberText: String {
+        let trimmed = receipt_number?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return trimmed.isEmpty ? "Unavailable" : trimmed
     }
 
     var sourceText: String {
@@ -54,6 +82,11 @@ struct Sale: Decodable, Identifiable {
 
     var createdAtText: String {
         Self.displayFormatter.string(from: Self.parseDate(created_at) ?? Date())
+    }
+
+    var customerAccountName: String {
+        let trimmed = customer_accounts?.name?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return trimmed.isEmpty ? "Walk-in / Not provided" : trimmed
     }
 
     private static let displayFormatter: DateFormatter = {

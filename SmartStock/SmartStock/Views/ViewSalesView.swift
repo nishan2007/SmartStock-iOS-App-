@@ -69,9 +69,23 @@ struct ViewSalesView: View {
                                 .font(.subheadline)
                                 .foregroundColor(.secondary)
 
-                                Text(sale.storeName)
-                                    .font(.subheadline)
-                                    .foregroundColor(.secondary)
+                                HStack {
+                                    Text(sale.storeName)
+                                        .font(.subheadline)
+                                        .foregroundColor(.secondary)
+
+                                    Spacer()
+
+                                    if sale.hasReturns {
+                                        Text("Returned \(sale.returnedAmountText)")
+                                            .font(.caption.weight(.semibold))
+                                            .foregroundColor(.orange)
+                                            .padding(.horizontal, 8)
+                                            .padding(.vertical, 4)
+                                            .background(Color.orange.opacity(0.12))
+                                            .clipShape(Capsule())
+                                    }
+                                }
                             }
                             .padding(.vertical, 4)
                         }
@@ -102,7 +116,7 @@ struct ViewSalesView: View {
         do {
             sales = try await supabase
                 .from("sales")
-                .select("sale_id, total_amount, status, transaction_source, created_at, users(full_name), locations(name)")
+                .select("sale_id, total_amount, status, transaction_source, created_at, payment_status, returned_amount, receipt_number, receipt_device_id, receipt_sequence, users(full_name), locations(name), customer_accounts(name)")
                 .eq("location_id", value: store.id)
                 .order("sale_id", ascending: false)
                 .execute()

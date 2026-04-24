@@ -33,30 +33,33 @@ struct EmployeesView: View {
                     ForEach(viewModel.filteredEmployees) { employee in
                         NavigationLink {
                             EmployeeDetailScreenWrapper(employee: employee, viewModel: viewModel)
+                                .environmentObject(sessionManager)
                         } label: {
                             EmployeeRowView(employee: employee)
                         }
                         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                            NavigationLink {
-                                EditEmployeeView(employee: employee) {
-                                    await viewModel.refresh()
+                            if sessionManager.currentUser?.canAccess(.employees) == true {
+                                NavigationLink {
+                                    EditEmployeeView(employee: employee) {
+                                        await viewModel.refresh()
+                                    }
+                                } label: {
+                                    Label("Edit", systemImage: "pencil")
                                 }
-                            } label: {
-                                Label("Edit", systemImage: "pencil")
-                            }
-                            .tint(.blue)
+                                .tint(.blue)
 
-                            Button {
-                                Task {
-                                    await viewModel.toggleEmployeeStatus(employee)
+                                Button {
+                                    Task {
+                                        await viewModel.toggleEmployeeStatus(employee)
+                                    }
+                                } label: {
+                                    Label(
+                                        employee.isActive ? "Deactivate" : "Activate",
+                                        systemImage: employee.isActive ? "pause.circle" : "play.circle"
+                                    )
                                 }
-                            } label: {
-                                Label(
-                                    employee.isActive ? "Deactivate" : "Activate",
-                                    systemImage: employee.isActive ? "pause.circle" : "play.circle"
-                                )
+                                .tint(employee.isActive ? .orange : .green)
                             }
-                            .tint(employee.isActive ? .orange : .green)
                         }
                     }
                 }
@@ -74,12 +77,23 @@ struct EmployeesView: View {
                     }
                 }
 
-                NavigationLink {
-                    AddEmployeeView {
-                        await viewModel.refresh()
+                if sessionManager.currentUser?.canAccess(.deviceManagement) == true {
+                    NavigationLink {
+                        DeviceManagementView()
+                            .environmentObject(sessionManager)
+                    } label: {
+                        Image(systemName: "iphone.badge.checkmark")
                     }
-                } label: {
-                    Image(systemName: "plus")
+                }
+
+                if sessionManager.currentUser?.canAccess(.employees) == true {
+                    NavigationLink {
+                        AddEmployeeView {
+                            await viewModel.refresh()
+                        }
+                    } label: {
+                        Image(systemName: "plus")
+                    }
                 }
             }
         }
@@ -99,27 +113,30 @@ struct EmployeesView: View {
 }
 
 private struct EmployeeDetailScreenWrapper: View {
+    @EnvironmentObject private var sessionManager: SessionManager
     let employee: Employee
     @ObservedObject var viewModel: EmployeesViewModel
 
     var body: some View {
         EmployeeDetailView(employee: employee)
             .toolbar {
-                ToolbarItemGroup(placement: .topBarTrailing) {
-                    NavigationLink {
-                        AssignStoresView(employee: employee) {
-                            await viewModel.refresh()
+                if sessionManager.currentUser?.canAccess(.employees) == true {
+                    ToolbarItemGroup(placement: .topBarTrailing) {
+                        NavigationLink {
+                            AssignStoresView(employee: employee) {
+                                await viewModel.refresh()
+                            }
+                        } label: {
+                            Image(systemName: "building.2")
                         }
-                    } label: {
-                        Image(systemName: "building.2")
-                    }
 
-                    NavigationLink {
-                        EditEmployeeView(employee: employee) {
-                            await viewModel.refresh()
+                        NavigationLink {
+                            EditEmployeeView(employee: employee) {
+                                await viewModel.refresh()
+                            }
+                        } label: {
+                            Image(systemName: "pencil")
                         }
-                    } label: {
-                        Image(systemName: "pencil")
                     }
                 }
             }

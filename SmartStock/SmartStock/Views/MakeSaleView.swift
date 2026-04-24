@@ -16,12 +16,17 @@ struct MakeSaleView: View {
     @State private var searchText = ""
     @State private var products: [Product] = []
     @State private var cart: [CartItem] = []
+    @State private var discountText = ""
     @State private var isCheckingOut = false
     @State private var checkoutMessage: String?
     @State private var checkoutError: String?
     @State private var isShowingScanner = false
     @State private var scannedBarcode = ""
     @State private var scannerError: String?
+    @State private var editingPriceItemID: UUID?
+    @State private var editedUnitPriceText = ""
+    @State private var editingDiscountItemID: UUID?
+    @State private var editedItemDiscountText = ""
     @FocusState private var isSearchFieldFocused: Bool
     @State private var searchTask: Task<Void, Never>?
 
@@ -171,9 +176,13 @@ struct MakeSaleView: View {
                                         Text(item.product.name)
                                             .font(.headline)
 
-                                        if let price = item.product.price {
-                                            Text("$\(price, specifier: "%.2f") each")
-                                                .font(.subheadline)
+                                        Text("$\(item.unitPrice, specifier: "%.2f") each")
+                                            .font(.subheadline)
+                                            .foregroundColor(.secondary)
+
+                                        if item.discountAmount > 0 {
+                                            Text("Item discount: -$\(item.discountAmount, specifier: "%.2f")")
+                                                .font(.caption)
                                                 .foregroundColor(.secondary)
                                         }
                                     }
@@ -207,6 +216,23 @@ struct MakeSaleView: View {
                                 }
                                 .padding(.vertical, 2)
                                 .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
+                                .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                                    if canApplySaleDiscount {
+                                        Button("Discount") {
+                                            editingDiscountItemID = item.id
+                                            editedItemDiscountText = String(format: "%.2f", item.discountAmount)
+                                        }
+                                        .tint(.orange)
+                                    }
+
+                                    if canChangeSaleItemPrice {
+                                        Button("Price") {
+                                            editingPriceItemID = item.id
+                                            editedUnitPriceText = String(format: "%.2f", item.unitPrice)
+                                        }
+                                        .tint(.blue)
+                                    }
+                                }
                             }
                             .onDelete(perform: removeFromCart)
                         }
@@ -218,6 +244,21 @@ struct MakeSaleView: View {
                     Divider()
 
                     VStack {
+                        if canApplySaleDiscount {
+                            TextField("Discount", text: $discountText)
+                                .keyboardType(.decimalPad)
+                                .textFieldStyle(.roundedBorder)
+                        }
+
+                        Text("Subtotal: $\(subtotal, specifier: "%.2f")")
+                            .font(.subheadline)
+
+                        if canApplySaleDiscount, discountAmount > 0 {
+                            Text("Discount: -$\(discountAmount, specifier: "%.2f")")
+                                .font(.subheadline)
+                                .foregroundColor(.secondary)
+                        }
+
                         Text("Total: $\(total, specifier: "%.2f")")
                             .font(.headline)
 
@@ -263,14 +304,81 @@ struct MakeSaleView: View {
             }
             .navigationTitle("Make Sale")
             .navigationBarTitleDisplayMode(.inline)
+            .alert("Change Item Price", isPresented: isEditingItemPrice) {
+                TextField("Unit price", text: $editedUnitPriceText)
+                    .keyboardType(.decimalPad)
+                Button("Cancel", role: .cancel) {
+                    editingPriceItemID = nil
+                }
+                Button("Save") {
+                    applyEditedPrice()
+                }
+            } message: {
+                Text("Update the unit price for this cart item.")
+            }
+            .alert("Item Discount", isPresented: isEditingItemDiscount) {
+                TextField("Discount amount", text: $editedItemDiscountText)
+                    .keyboardType(.decimalPad)
+                Button("Cancel", role: .cancel) {
+                    editingDiscountItemID = nil
+                }
+                Button("Save") {
+                    applyEditedItemDiscount()
+                }
+            } message: {
+                Text("Apply a discount to this cart line.")
+            }
             .onDisappear {
                 searchTask?.cancel()
             }
         }
     }
 
-    var total: Double {
+    var canApplySaleDiscount: Bool {
+        sessionManager.currentUser?.canAccess(.applySaleDiscount) == true
+    }
+
+    var canChangeSaleItemPrice: Bool {
+        sessionManager.currentUser?.canAccess(.changeSaleItemPrice) == true
+    }
+
+    var subtotal: Double {
+        cart.reduce(0) { $0 + $1.subtotal }
+    }
+
+    var discountedCartSubtotal: Double {
         cart.reduce(0) { $0 + $1.lineTotal }
+    }
+
+    var total: Double {
+        max(discountedCartSubtotal - discountAmount, 0)
+    }
+
+    var discountAmount: Double {
+        guard canApplySaleDiscount else { return 0 }
+        let trimmed = discountText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let value = Double(trimmed), value > 0 else { return 0 }
+        return min(value, discountedCartSubtotal)
+    }
+
+    var isEditingItemPrice: Binding<Bool> {
+        Binding {
+            editingPriceItemID != nil
+        } set: { isPresented in
+            if !isPresented {
+                editingPriceItemID = nil
+            }
+        }
+    }
+
+    var isEditingItemDiscount: Binding<Bool> {
+        Binding {
+            editingDiscountItemID != nil
+        } set: { isPresented in
+            if !isPresented {
+                editingDiscountItemID = nil
+            }
+        }
     }
 
     var isShowingSearchResults: Bool {
@@ -298,6 +406,7 @@ struct MakeSaleView: View {
 
         guard let index = cart.firstIndex(where: { $0.id == item.id }) else { return }
         cart[index].quantity += 1
+        cart[index].discountAmount = min(cart[index].discountAmount, cart[index].subtotal)
     }
 
     func decreaseQuantity(for item: CartItem) {
@@ -308,6 +417,7 @@ struct MakeSaleView: View {
 
         if cart[index].quantity > 1 {
             cart[index].quantity -= 1
+            cart[index].discountAmount = min(cart[index].discountAmount, cart[index].subtotal)
         } else {
             cart.remove(at: index)
         }
@@ -325,6 +435,7 @@ struct MakeSaleView: View {
         scannerError = nil
         products = []
         cart.removeAll()
+        discountText = ""
         isSearchFieldFocused = true
     }
     func handleScannedBarcode(_ code: String) async {
@@ -501,6 +612,7 @@ struct MakeSaleView: View {
         do {
             try await CheckoutService.checkout(
                 cart: cart,
+                discountAmount: discountAmount,
                 user: user,
                 store: store
             )
@@ -510,11 +622,47 @@ struct MakeSaleView: View {
             searchText = ""
             scannedBarcode = ""
             scannerError = nil
+            discountText = ""
             isSearchFieldFocused = true
             checkoutMessage = "Sale completed successfully."
         } catch {
             checkoutError = error.localizedDescription
             print("CHECKOUT ERROR:", error)
         }
+    }
+
+    func applyEditedPrice() {
+        guard let editingPriceItemID,
+              let index = cart.firstIndex(where: { $0.id == editingPriceItemID }) else {
+            self.editingPriceItemID = nil
+            return
+        }
+
+        guard let newPrice = Double(editedUnitPriceText.trimmingCharacters(in: .whitespacesAndNewlines)),
+              newPrice >= 0 else {
+            checkoutError = "Enter a valid unit price."
+            return
+        }
+
+        cart[index].unitPrice = newPrice
+        cart[index].discountAmount = min(cart[index].discountAmount, cart[index].subtotal)
+        self.editingPriceItemID = nil
+    }
+
+    func applyEditedItemDiscount() {
+        guard let editingDiscountItemID,
+              let index = cart.firstIndex(where: { $0.id == editingDiscountItemID }) else {
+            self.editingDiscountItemID = nil
+            return
+        }
+
+        guard let newDiscount = Double(editedItemDiscountText.trimmingCharacters(in: .whitespacesAndNewlines)),
+              newDiscount >= 0 else {
+            checkoutError = "Enter a valid item discount."
+            return
+        }
+
+        cart[index].discountAmount = min(newDiscount, cart[index].subtotal)
+        self.editingDiscountItemID = nil
     }
 }

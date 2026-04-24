@@ -19,10 +19,16 @@ struct SaleDetailView: View {
         List {
             Section("Transaction Info") {
                 detailRow(title: "Sale ID", value: "#\(sale.sale_id)")
+                detailRow(title: "Receipt", value: sale.receiptNumberText)
+                detailRow(title: "Customer / Account", value: sale.customerAccountName)
                 detailRow(title: "Cashier", value: sale.cashierName)
                 detailRow(title: "Store", value: sale.storeName)
                 detailRow(title: "Source", value: sale.sourceText)
                 detailRow(title: "Status", value: sale.status?.capitalized ?? "Unknown")
+                detailRow(title: "Payment Status", value: sale.paymentStatusText)
+                if sale.hasReturns {
+                    detailRow(title: "Returned", value: sale.returnedAmountText)
+                }
                 detailRow(title: "Completed", value: completedAtText)
                 detailRow(title: "Total", value: sale.totalText)
             }

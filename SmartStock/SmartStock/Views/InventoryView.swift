@@ -40,14 +40,21 @@ struct InventoryView: View {
 
                             LazyVStack(spacing: 12) {
                                 ForEach(viewModel.filteredItems) { item in
-                                    NavigationLink {
-                                        InventoryDetailView(item: item) {
-                                            Task {
-                                                await viewModel.refresh(locationId: sessionManager.selectedStore?.id)
+                                    Group {
+                                        if canOpenItemDetails {
+                                            NavigationLink {
+                                                InventoryDetailView(item: item) {
+                                                    Task {
+                                                        await viewModel.refresh(locationId: sessionManager.selectedStore?.id)
+                                                    }
+                                                }
+                                                .environmentObject(sessionManager)
+                                            } label: {
+                                                InventoryRowView(item: item)
                                             }
+                                        } else {
+                                            InventoryRowView(item: item)
                                         }
-                                    } label: {
-                                        InventoryRowView(item: item)
                                     }
                                     .buttonStyle(.plain)
                                 }
@@ -70,12 +77,14 @@ struct InventoryView: View {
                     }
                     .accessibilityLabel("Scan barcode")
 
-                    Button {
-                        isShowingNewItem = true
-                    } label: {
-                        Image(systemName: "plus.circle.fill")
+                    if canAddNewItem {
+                        Button {
+                            isShowingNewItem = true
+                        } label: {
+                            Image(systemName: "plus.circle.fill")
+                        }
+                        .accessibilityLabel("Add item")
                     }
-                    .accessibilityLabel("Add item")
                 }
             }
             .searchable(text: $viewModel.searchText, prompt: "Search by item, SKU, barcode, store...")
@@ -112,6 +121,15 @@ struct InventoryView: View {
                 }
             }
         }
+    }
+
+    private var canOpenItemDetails: Bool {
+        sessionManager.currentUser?.canAccess(.viewItemDetails) == true
+        || sessionManager.currentUser?.canAccess(.editItem) == true
+    }
+
+    private var canAddNewItem: Bool {
+        sessionManager.currentUser?.canAccess(.addNewItem) == true
     }
 
     private var summaryCards: some View {
