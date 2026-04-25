@@ -53,6 +53,7 @@ struct EndOfDayView: View {
                     metricRow("Paid", currency(report.paid))
                     metricRow("Unpaid", currency(report.unpaid))
                     metricRow("Cash", currency(report.cash))
+                    metricRow("Customer Payments", currency(report.customerPayments.reduce(0.0) { $0 + abs($1.amount ?? 0) }))
                     metricRow("Card / Check", currency(report.card))
                     metricRow("Account", currency(report.account))
                 } else {
@@ -95,6 +96,34 @@ struct EndOfDayView: View {
                     }
                 } else if !isLoading {
                     Text("No sales found for today.")
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            Section("Customer Payments Today") {
+                if let report, !report.customerPayments.isEmpty {
+                    ForEach(report.customerPayments) { payment in
+                        VStack(alignment: .leading, spacing: 6) {
+                            HStack {
+                                Text(payment.paymentIdText)
+                                    .font(.headline)
+                                Spacer()
+                                Text(payment.amountText)
+                                    .font(.headline)
+                            }
+
+                            Text(payment.customerName)
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+
+                            Text("\(payment.createdAtText) • \(payment.employeeText)")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        .padding(.vertical, 4)
+                    }
+                } else if !isLoading {
+                    Text("No customer account payments found for today.")
                         .foregroundStyle(.secondary)
                 }
             }

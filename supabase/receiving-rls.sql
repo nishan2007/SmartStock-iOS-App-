@@ -147,7 +147,7 @@ on public.inventory_movements
 for select
 to authenticated
 using (
-  reason = 'receive'
+  reason in ('receive', 'INVENTORY_ENTRY')
   and public.current_app_user_can_view_receiving_at_location(location_id)
 );
 
@@ -156,7 +156,7 @@ on public.inventory_movements
 for insert
 to authenticated
 with check (
-  reason = 'receive'
+  reason in ('receive', 'INVENTORY_ENTRY')
   and public.current_app_user_can_receive_at_location(location_id)
 );
 

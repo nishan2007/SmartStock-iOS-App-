@@ -193,7 +193,7 @@ on public.inventory_movements
 for select
 to authenticated
 using (
-  reason = 'sale'
+  reason in ('sale', 'SALE')
   and public.current_app_user_can_view_sales_at_location(location_id)
 );
 
@@ -202,7 +202,7 @@ on public.inventory_movements
 for insert
 to authenticated
 with check (
-  reason = 'sale'
+  reason in ('sale', 'SALE')
   and public.current_app_user_can_sell_at_location(location_id)
 );
 

@@ -12,8 +12,7 @@ struct CustomerDetailView: View {
     let customer: CustomerAccount
 
     @State private var customerDetails: CustomerAccount
-    @State private var sales: [Sale] = []
-    @State private var isLoadingSales = true
+    @State private var isRefreshingCustomer = true
     @State private var isShowingEditSheet = false
     @State private var isUpdating = false
     @State private var errorMessage: String?
@@ -49,6 +48,14 @@ struct CustomerDetailView: View {
             }
 
             Section("Customer Info") {
+                if isRefreshingCustomer {
+                    HStack {
+                        Spacer()
+                        ProgressView("Refreshing account...")
+                        Spacer()
+                    }
+                }
+
                 detailRow(title: "Name", value: customerDetails.name)
                 detailRow(title: "Account Number", value: customerDetails.accountNumberText)
 
@@ -80,50 +87,47 @@ struct CustomerDetailView: View {
                 }
             }
 
-            Section("Transaction History") {
-                if isLoadingSales {
-                    HStack {
-                        Spacer()
-                        ProgressView("Loading history...")
-                        Spacer()
-                    }
-                } else if sales.isEmpty {
-                    ContentUnavailableView(
-                        "No Transactions Yet",
-                        systemImage: "receipt",
-                        description: Text("Sales for this customer will appear here.")
-                    )
-                } else {
-                    ForEach(sales) { sale in
-                        NavigationLink {
-                            SaleDetailView(sale: sale)
-                        } label: {
-                            VStack(alignment: .leading, spacing: 8) {
-                                HStack {
-                                    Text("Sale #\(sale.sale_id)")
-                                        .font(.headline)
-                                    Spacer()
-                                    Text(sale.totalText)
-                                        .font(.headline)
-                                }
-
-                                Text(sale.createdAtText)
-                                    .font(.subheadline)
-                                    .foregroundStyle(.secondary)
-
-                                HStack {
-                                    Text(sale.storeName)
-                                    Spacer()
-                                    Text(sale.paymentStatusText)
-                                }
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                            }
-                            .padding(.vertical, 4)
+            Section("Account Activity") {
+                if canManageCustomers {
+                    NavigationLink {
+                        CustomerPaymentView(customer: customerDetails) { newBalance in
+                            customerDetails = CustomerAccount(
+                                customerId: customerDetails.customerId,
+                                accountNumber: customerDetails.accountNumber,
+                                name: customerDetails.name,
+                                phone: customerDetails.phone,
+                                email: customerDetails.email,
+                                creditLimit: customerDetails.creditLimit,
+                                currentBalance: newBalance,
+                                isActive: customerDetails.isActive,
+                                isBusiness: customerDetails.isBusiness,
+                                accountNotes: customerDetails.accountNotes,
+                                customerTypeId: customerDetails.customerTypeId,
+                                createdAt: customerDetails.createdAt
+                            )
+                            await reloadCustomerData()
                         }
+                        .environmentObject(sessionManager)
+                    } label: {
+                        Label("Record Payment", systemImage: "dollarsign.circle")
                     }
                 }
+
+                NavigationLink {
+                    CustomerPaymentHistoryView(customer: customerDetails)
+                } label: {
+                    Label("Payment History", systemImage: "banknote")
+                }
+
+                NavigationLink {
+                    CustomerSalesHistoryView(customer: customerDetails)
+                } label: {
+                    Label("Sales History", systemImage: "receipt")
+                }
             }
+        }
+        .refreshable {
+            await reloadCustomerData()
         }
         .navigationTitle(customerDetails.name)
         .navigationBarTitleDisplayMode(.inline)
@@ -202,7 +206,7 @@ struct CustomerDetailView: View {
             }
         }
         .task {
-            await loadSales()
+            await reloadCustomerData()
         }
     }
 
@@ -245,21 +249,18 @@ struct CustomerDetailView: View {
         return Self.displayFormatter.string(from: date)
     }
 
-    private func loadSales() async {
-        isLoadingSales = true
-        errorMessage = nil
-        defer { isLoadingSales = false }
+    private func reloadCustomerData() async {
+        await refreshCustomerDetails()
+    }
+
+    private func refreshCustomerDetails() async {
+        isRefreshingCustomer = true
+        defer { isRefreshingCustomer = false }
 
         do {
-            sales = try await supabase
-                .from("sales")
-                .select("sale_id, total_amount, status, transaction_source, created_at, payment_status, returned_amount, receipt_number, receipt_device_id, receipt_sequence, users(full_name), locations(name), customer_accounts(name)")
-                .eq("customer_id", value: customerDetails.customerId)
-                .order("sale_id", ascending: false)
-                .execute()
-                .value
+            customerDetails = try await CustomerAccountService.fetchCustomer(customerDetails.customerId)
         } catch {
-            print("LOAD CUSTOMER SALES ERROR:", error)
+            print("LOAD CUSTOMER DETAIL ERROR:", error)
             errorMessage = error.localizedDescription
         }
     }

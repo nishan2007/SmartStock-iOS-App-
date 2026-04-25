@@ -40,6 +40,7 @@ enum MobilePermission: String, CaseIterable, Identifiable, Codable, Hashable {
     case viewReports = "view_reports"
     case viewSales = "view_sales"
     case viewVendor = "view_vendor"
+    case verifyStoreTransferQuantity = "verify_store_transfer_quantity"
 
     var id: String { rawValue }
 
@@ -113,6 +114,8 @@ enum MobilePermission: String, CaseIterable, Identifiable, Codable, Hashable {
             return "View Previous Transactions"
         case .viewVendor:
             return "View Vendor"
+        case .verifyStoreTransferQuantity:
+            return "Verify Store Transfer Quantity"
         }
     }
 
@@ -120,7 +123,7 @@ enum MobilePermission: String, CaseIterable, Identifiable, Codable, Hashable {
         switch self {
         case .makeSale, .viewSales, .returns, .endOfDay, .customers, .manageCustomers, .editCustomerCreditLimit, .editAccountNumber, .applySaleDiscount, .changeSaleItemPrice:
             return "Sales"
-        case .inventory, .receiving, .storeTransfer, .editItem, .addNewItem, .adjustInventoryQuantity, .viewCostPrice, .viewItemDetails, .viewCreatedBy, .departmentManagement, .vendorManagement, .viewVendor, .viewReceivingHistory:
+        case .inventory, .receiving, .storeTransfer, .verifyStoreTransferQuantity, .editItem, .addNewItem, .adjustInventoryQuantity, .viewCostPrice, .viewItemDetails, .viewCreatedBy, .departmentManagement, .vendorManagement, .viewVendor, .viewReceivingHistory:
             return "Inventory"
         case .timeClock:
             return "Employee"

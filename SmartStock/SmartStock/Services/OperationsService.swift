@@ -113,7 +113,7 @@ struct OperationsService {
                     .execute()
             }
 
-            let note = "Received \(item.quantity)"
+            let note = "entered_by_user_id=\(user.id)"
             _ = try await client
                 .from("inventory_movements")
                 .insert(
@@ -121,7 +121,7 @@ struct OperationsService {
                         product_id: item.productId,
                         location_id: store.id,
                         change_qty: item.quantity,
-                        reason: "receive",
+                        reason: "INVENTORY_ENTRY",
                         note: note,
                         receive_id: receiveNumber.receiveId,
                         receive_device_id: receiveNumber.deviceId,
@@ -154,12 +154,40 @@ struct OperationsService {
             throw OperationsServiceError.productNotFound
         }
 
-        let sourceInventory = try await fetchInventoryRecord(productId: product.id, locationId: fromStore.id)
-        guard let sourceInventory else {
-            throw OperationsServiceError.inventoryNotFound
+        return try await createStoreTransfer(
+            items: [
+                StoreTransferCreateItem(
+                    productId: product.id,
+                    productName: product.name,
+                    quantity: quantity
+                )
+            ],
+            destinationStoreId: destinationStoreId,
+            notes: notes,
+            fromStore: fromStore,
+            user: user
+        )
+    }
+
+    func createStoreTransfer(
+        items: [StoreTransferCreateItem],
+        destinationStoreId: Int,
+        notes: String?,
+        fromStore: Store,
+        user: AppUser
+    ) async throws -> StoreTransferResult {
+        guard !items.isEmpty else {
+            throw OperationsServiceError.invalidQuantity
         }
-        guard sourceInventory.quantity_on_hand >= quantity else {
-            throw OperationsServiceError.insufficientInventory
+
+        for item in items {
+            let sourceInventory = try await fetchInventoryRecord(productId: item.productId, locationId: fromStore.id)
+            guard let sourceInventory else {
+                throw OperationsServiceError.inventoryNotFound
+            }
+            guard sourceInventory.quantity_on_hand >= item.quantity else {
+                throw OperationsServiceError.insufficientInventory
+            }
         }
 
         let insertedTransfer: InsertedStoreTransfer = try await client
@@ -179,41 +207,294 @@ struct OperationsService {
             .execute()
             .value
 
+        let transferItems = items.map {
+            NewStoreTransferItem(
+                transfer_id: insertedTransfer.transfer_id,
+                product_id: $0.productId,
+                quantity: $0.quantity
+            )
+        }
+
         _ = try await client
             .from("store_transfer_items")
-            .insert(
-                NewStoreTransferItem(
-                    transfer_id: insertedTransfer.transfer_id,
-                    product_id: product.id,
-                    quantity: quantity
+            .insert(transferItems)
+            .execute()
+
+        for item in items {
+            let sourceInventory = try await fetchInventoryRecord(productId: item.productId, locationId: fromStore.id)
+            guard let sourceInventory else {
+                throw OperationsServiceError.inventoryNotFound
+            }
+
+            _ = try await client
+                .from("inventory")
+                .update(InventoryQuantityUpdate(quantity_on_hand: sourceInventory.quantity_on_hand - item.quantity))
+                .eq("inventory_id", value: sourceInventory.inventory_id)
+                .execute()
+
+            _ = try await client
+                .from("inventory_movements")
+                .insert(
+                    OperationInventoryMovement(
+                        product_id: item.productId,
+                        location_id: fromStore.id,
+                        change_qty: -item.quantity,
+                        reason: "TRANSFER_OUT",
+                        note: "transfer_id=\(insertedTransfer.transfer_id); from_location_id=\(fromStore.id); to_location_id=\(destinationStoreId)",
+                        receive_id: nil,
+                        receive_device_id: nil,
+                        receive_sequence: nil,
+                        user_name: user.fullName
+                    )
+                )
+                .execute()
+        }
+
+        return StoreTransferResult(
+            transferId: insertedTransfer.transfer_id,
+            itemCount: items.count,
+            totalUnits: items.reduce(0) { $0 + $1.quantity }
+        )
+    }
+
+    func fetchIncomingStoreTransfers(storeId: Int) async throws -> [IncomingStoreTransfer] {
+        let transferRows: [IncomingStoreTransferRow] = try await client
+            .from("store_transfers")
+            .select("transfer_id, from_location_id, to_location_id, user_name, note, created_at, status, from_store:locations!store_transfers_from_location_id_fkey(name)")
+            .eq("to_location_id", value: storeId)
+            .eq("status", value: "PENDING")
+            .order("created_at", ascending: true)
+            .execute()
+            .value
+
+        var transfers: [IncomingStoreTransfer] = []
+        for row in transferRows {
+            let itemRows: [IncomingStoreTransferItemRow] = try await client
+                .from("store_transfer_items")
+                .select("transfer_item_id, product_id, quantity, product:products(name, sku)")
+                .eq("transfer_id", value: Int(row.transfer_id))
+                .order("transfer_item_id", ascending: true)
+                .execute()
+                .value
+
+            let items = itemRows.map {
+                IncomingStoreTransferItem(
+                    transferItemId: $0.transfer_item_id,
+                    productId: $0.product_id,
+                    productName: $0.product?.name ?? "Unknown Product",
+                    sku: $0.product?.sku,
+                    quantity: $0.quantity
+                )
+            }
+
+            transfers.append(
+                IncomingStoreTransfer(
+                    transferId: row.transfer_id,
+                    fromLocationId: row.from_location_id,
+                    toLocationId: row.to_location_id,
+                    fromStoreName: row.from_store?.name ?? "Unknown Store",
+                    userName: row.user_name,
+                    note: row.note,
+                    createdAt: row.created_at.flatMap(parseOperationsDate),
+                    status: row.status ?? "PENDING",
+                    items: items
                 )
             )
+        }
+
+        return transfers
+    }
+
+    func receiveStoreTransfer(
+        transferId: Int64,
+        receivingStore: Store,
+        user: AppUser,
+        verifiedQuantities: [Int64: Int] = [:],
+        canAdjustQuantityMismatch: Bool = false
+    ) async throws -> ReceivedStoreTransferResult {
+        let transferRows: [StoreTransferReceiveRow] = try await client
+            .from("store_transfers")
+            .select("transfer_id, from_location_id, to_location_id, status")
+            .eq("transfer_id", value: Int(transferId))
+            .limit(1)
             .execute()
+            .value
+
+        guard let transfer = transferRows.first else {
+            throw OperationsServiceError.transferNotFound
+        }
+
+        guard transfer.to_location_id == receivingStore.id else {
+            throw OperationsServiceError.transferWrongDestination
+        }
+
+        guard transfer.status?.uppercased() == "PENDING" else {
+            throw OperationsServiceError.transferAlreadyReceived
+        }
+
+        let itemRows: [StoreTransferReceiveItemRow] = try await client
+            .from("store_transfer_items")
+            .select("transfer_item_id, product_id, quantity")
+            .eq("transfer_id", value: Int(transferId))
+            .order("transfer_item_id", ascending: true)
+            .execute()
+            .value
+
+        guard !itemRows.isEmpty else {
+            throw OperationsServiceError.transferHasNoItems
+        }
+
+        let resolvedItems = try itemRows.map { item -> VerifiedStoreTransferReceiveItem in
+            let verifiedQuantity = verifiedQuantities[item.transfer_item_id] ?? item.quantity
+            guard verifiedQuantity > 0 else {
+                throw OperationsServiceError.invalidQuantity
+            }
+
+            return VerifiedStoreTransferReceiveItem(
+                transferItemId: item.transfer_item_id,
+                productId: item.product_id,
+                expectedQuantity: item.quantity,
+                receivedQuantity: verifiedQuantity
+            )
+        }
+
+        let hasQuantityMismatch = resolvedItems.contains { $0.expectedQuantity != $0.receivedQuantity }
+        if hasQuantityMismatch && !canAdjustQuantityMismatch {
+            throw OperationsServiceError.transferQuantityVerificationPermissionRequired
+        }
+
+        let receiveNumber = await MainActor.run {
+            ReceiptNumberManager.shared.nextReceive(for: receivingStore.id)
+        }
+
+        let receiveBatch = NewReceivingBatch(
+            receive_id: receiveNumber.receiveId,
+            location_id: receivingStore.id,
+            user_id: user.id,
+            receive_device_id: receiveNumber.deviceId,
+            receive_sequence: receiveNumber.sequence,
+            user_name: user.fullName
+        )
 
         _ = try await client
-            .from("inventory")
-            .update(InventoryQuantityUpdate(quantity_on_hand: sourceInventory.quantity_on_hand - quantity))
-            .eq("inventory_id", value: sourceInventory.inventory_id)
+            .from("receiving_batches")
+            .insert(receiveBatch)
             .execute()
 
+        for item in resolvedItems {
+            if item.expectedQuantity != item.receivedQuantity {
+                let sourceInventory = try await fetchInventoryRecord(productId: item.productId, locationId: transfer.from_location_id)
+                let sourceAdjustment = item.expectedQuantity - item.receivedQuantity
+
+                if sourceAdjustment != 0 {
+                    if let sourceInventory {
+                        let newSourceQuantity = sourceInventory.quantity_on_hand + sourceAdjustment
+                        _ = try await client
+                            .from("inventory")
+                            .update(InventoryQuantityUpdate(quantity_on_hand: newSourceQuantity))
+                            .eq("inventory_id", value: sourceInventory.inventory_id)
+                            .execute()
+                    } else if sourceAdjustment > 0 {
+                        _ = try await client
+                            .from("inventory")
+                            .insert(
+                                NewInventoryRecord(
+                                    product_id: item.productId,
+                                    location_id: transfer.from_location_id,
+                                    quantity_on_hand: sourceAdjustment
+                                )
+                            )
+                            .execute()
+                    } else {
+                        throw OperationsServiceError.inventoryNotFound
+                    }
+
+                    _ = try await client
+                        .from("inventory_movements")
+                        .insert(
+                            OperationInventoryMovement(
+                                product_id: item.productId,
+                                location_id: transfer.from_location_id,
+                                change_qty: sourceAdjustment,
+                                reason: "TRANSFER_ADJUSTMENT",
+                                note: "transfer_id=\(transferId); transfer_item_id=\(item.transferItemId); to_location_id=\(receivingStore.id); expected_quantity=\(item.expectedQuantity); verified_quantity=\(item.receivedQuantity); adjusted_by_user_id=\(user.id)",
+                                receive_id: nil,
+                                receive_device_id: nil,
+                                receive_sequence: nil,
+                                user_name: user.fullName
+                            )
+                        )
+                        .execute()
+                }
+
+                _ = try await client
+                    .from("store_transfer_items")
+                    .update(StoreTransferItemQuantityUpdate(quantity: item.receivedQuantity))
+                    .eq("transfer_item_id", value: Int(item.transferItemId))
+                    .execute()
+            }
+
+            let existingInventory = try await fetchInventoryRecord(productId: item.productId, locationId: receivingStore.id)
+            let newQuantity = (existingInventory?.quantity_on_hand ?? 0) + item.receivedQuantity
+
+            if let existingInventory {
+                _ = try await client
+                    .from("inventory")
+                    .update(InventoryQuantityUpdate(quantity_on_hand: newQuantity))
+                    .eq("inventory_id", value: existingInventory.inventory_id)
+                    .execute()
+            } else {
+                _ = try await client
+                    .from("inventory")
+                    .insert(NewInventoryRecord(product_id: item.productId, location_id: receivingStore.id, quantity_on_hand: item.receivedQuantity))
+                    .execute()
+            }
+
+            let note: String
+            if item.expectedQuantity == item.receivedQuantity {
+                note = "transfer_id=\(transferId); from_location_id=\(transfer.from_location_id); received_by_user_id=\(user.id)"
+            } else {
+                note = "transfer_id=\(transferId); transfer_item_id=\(item.transferItemId); from_location_id=\(transfer.from_location_id); expected_quantity=\(item.expectedQuantity); received_quantity=\(item.receivedQuantity); received_by_user_id=\(user.id)"
+            }
+
+            _ = try await client
+                .from("inventory_movements")
+                .insert(
+                    OperationInventoryMovement(
+                        product_id: item.productId,
+                        location_id: receivingStore.id,
+                        change_qty: item.receivedQuantity,
+                        reason: "INVENTORY_ENTRY",
+                        note: note,
+                        receive_id: receiveNumber.receiveId,
+                        receive_device_id: receiveNumber.deviceId,
+                        receive_sequence: receiveNumber.sequence,
+                        user_name: user.fullName
+                    )
+                )
+                .execute()
+        }
+
         _ = try await client
-            .from("inventory_movements")
-            .insert(
-                OperationInventoryMovement(
-                    product_id: product.id,
-                    location_id: fromStore.id,
-                    change_qty: -quantity,
-                    reason: "transfer",
-                    note: "Transfer #\(insertedTransfer.transfer_id) to store \(destinationStoreId)",
-                    receive_id: nil,
-                    receive_device_id: nil,
-                    receive_sequence: nil,
-                    user_name: user.fullName
+            .from("store_transfers")
+            .update(
+                StoreTransferReceiveUpdate(
+                    status: "RECEIVED",
+                    received_at: ISO8601DateFormatter().string(from: Date()),
+                    received_by_user_id: user.id,
+                    received_by_name: user.fullName,
+                    receive_id: receiveNumber.receiveId
                 )
             )
+            .eq("transfer_id", value: Int(transferId))
             .execute()
 
-        return StoreTransferResult(transferId: insertedTransfer.transfer_id, productName: product.name)
+        return ReceivedStoreTransferResult(
+            transferId: transferId,
+            receiveId: receiveNumber.receiveId,
+            itemCount: resolvedItems.count,
+            hasAdjustedQuantities: hasQuantityMismatch
+        )
     }
 
     func lookupReturnSale(query: String, barcode: String, storeId: Int) async throws -> ReturnSaleLookupResult {
@@ -451,6 +732,17 @@ struct OperationsService {
             .execute()
             .value
 
+        let customerPayments: [EndOfDayCustomerPaymentRow] = try await client
+            .from("customer_account_transactions")
+            .select("transaction_id, payment_id, amount, note, created_at, user_name, customer_accounts(name)")
+            .eq("transaction_type", value: "PAYMENT")
+            .eq("location_id", value: storeId)
+            .gte("created_at", value: startValue)
+            .lt("created_at", value: endValue)
+            .order("created_at", ascending: true)
+            .execute()
+            .value
+
         var totalSales = 0.0
         var discounts = 0.0
         var paid = 0.0
@@ -479,6 +771,10 @@ struct OperationsService {
             }
         }
 
+        let customerPaymentCash = customerPayments.reduce(0.0) { $0 + abs($1.amount ?? 0) }
+        cash += customerPaymentCash
+        paid += customerPaymentCash
+
         let returnTotal = returns.reduce(0.0) { $0 + ($1.refund_amount ?? 0) }
         let unpaid = max(totalSales - paid, 0)
 
@@ -493,7 +789,8 @@ struct OperationsService {
             cash: cash,
             card: card,
             account: account,
-            sales: sales
+            sales: sales,
+            customerPayments: customerPayments
         )
     }
 
@@ -573,6 +870,32 @@ struct OperationsService {
         let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         return trimmed.isEmpty ? nil : trimmed
     }
+
+    private func parseOperationsDate(_ value: String) -> Date? {
+        let isoWithFractional = ISO8601DateFormatter()
+        isoWithFractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let date = isoWithFractional.date(from: value) {
+            return date
+        }
+
+        let iso = ISO8601DateFormatter()
+        iso.formatOptions = [.withInternetDateTime]
+        if let date = iso.date(from: value) {
+            return date
+        }
+
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
+        if let date = formatter.date(from: value) {
+            return date
+        }
+
+        let formatterWithFraction = DateFormatter()
+        formatterWithFraction.locale = Locale(identifier: "en_US_POSIX")
+        formatterWithFraction.dateFormat = "yyyy-MM-dd HH:mm:ss.SSSSSS"
+        return formatterWithFraction.date(from: value)
+    }
 }
 
 enum OperationsServiceError: LocalizedError {
@@ -584,6 +907,11 @@ enum OperationsServiceError: LocalizedError {
     case returnQuantityTooHigh
     case inventoryNotFound
     case insufficientInventory
+    case transferNotFound
+    case transferWrongDestination
+    case transferAlreadyReceived
+    case transferHasNoItems
+    case transferQuantityVerificationPermissionRequired
     case unexpectedResponse
 
     var errorDescription: String? {
@@ -604,6 +932,16 @@ enum OperationsServiceError: LocalizedError {
             return "No inventory record found for that item in the selected store."
         case .insufficientInventory:
             return "Not enough quantity on hand for this transfer."
+        case .transferNotFound:
+            return "Transfer not found."
+        case .transferWrongDestination:
+            return "This transfer belongs to a different receiving store."
+        case .transferAlreadyReceived:
+            return "This transfer has already been received."
+        case .transferHasNoItems:
+            return "This transfer has no items."
+        case .transferQuantityVerificationPermissionRequired:
+            return "You need permission to change a transfer quantity during receiving."
         case .unexpectedResponse:
             return "The server returned an unexpected response."
         }
@@ -639,7 +977,48 @@ struct ReceiveInventoryItem {
 
 struct StoreTransferResult {
     let transferId: Int64
+    let itemCount: Int
+    let totalUnits: Int
+}
+
+struct StoreTransferCreateItem {
+    let productId: Int
     let productName: String
+    let quantity: Int
+}
+
+struct ReceivedStoreTransferResult {
+    let transferId: Int64
+    let receiveId: String
+    let itemCount: Int
+    let hasAdjustedQuantities: Bool
+}
+
+struct IncomingStoreTransfer: Identifiable {
+    let transferId: Int64
+    let fromLocationId: Int
+    let toLocationId: Int
+    let fromStoreName: String
+    let userName: String?
+    let note: String?
+    let createdAt: Date?
+    let status: String
+    let items: [IncomingStoreTransferItem]
+
+    var id: Int64 { transferId }
+
+    var itemCount: Int { items.count }
+    var totalUnits: Int { items.reduce(0) { $0 + $1.quantity } }
+}
+
+struct IncomingStoreTransferItem: Identifiable {
+    let transferItemId: Int64
+    let productId: Int
+    let productName: String
+    let sku: String?
+    let quantity: Int
+
+    var id: Int64 { transferItemId }
 }
 
 struct ReturnResult {
@@ -665,6 +1044,7 @@ struct EndOfDayReport {
     let card: Double
     let account: Double
     let sales: [EndOfDaySaleRow]
+    let customerPayments: [EndOfDayCustomerPaymentRow]
 }
 
 struct EndOfDaySaleRow: Decodable, Identifiable {
@@ -711,16 +1091,60 @@ struct EndOfDaySaleRow: Decodable, Identifiable {
         String(format: "$%.2f", total_amount ?? 0)
     }
 
-    private static let displayFormatter: DateFormatter = {
+    static let displayTimeFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.dateStyle = .none
         formatter.timeStyle = .short
         return formatter
     }()
+
+    private static let displayFormatter = displayTimeFormatter
 }
 
 private struct EndOfDayReturnRow: Decodable {
     let refund_amount: Double?
+}
+
+struct EndOfDayCustomerPaymentAccount: Decodable {
+    let name: String?
+}
+
+struct EndOfDayCustomerPaymentRow: Decodable, Identifiable {
+    let transaction_id: Int
+    let payment_id: String?
+    let amount: Double?
+    let note: String?
+    let created_at: String?
+    let user_name: String?
+    let customer_accounts: EndOfDayCustomerPaymentAccount?
+
+    var id: Int { transaction_id }
+
+    var paymentIdText: String {
+        let trimmed = payment_id?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return trimmed.isEmpty ? String(format: "PAY-%06d", transaction_id) : trimmed
+    }
+
+    var customerName: String {
+        let trimmed = customer_accounts?.name?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return trimmed.isEmpty ? "Unknown Customer" : trimmed
+    }
+
+    var employeeText: String {
+        let trimmed = user_name?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return trimmed.isEmpty ? "Unknown" : trimmed
+    }
+
+    var createdAtText: String {
+        guard let created_at, let date = Sale.parseDate(created_at) else {
+            return "Unavailable"
+        }
+        return EndOfDaySaleRow.displayTimeFormatter.string(from: date)
+    }
+
+    var amountText: String {
+        String(format: "$%.2f", abs(amount ?? 0))
+    }
 }
 
 private struct InventoryRecord: Decodable {
@@ -772,6 +1196,65 @@ private struct NewStoreTransferItem: Encodable {
     let transfer_id: Int64
     let product_id: Int
     let quantity: Int
+}
+
+private struct IncomingStoreTransferRow: Decodable {
+    let transfer_id: Int64
+    let from_location_id: Int
+    let to_location_id: Int
+    let user_name: String?
+    let note: String?
+    let created_at: String?
+    let status: String?
+    let from_store: TransferLocationName?
+}
+
+private struct TransferLocationName: Decodable {
+    let name: String?
+}
+
+private struct IncomingStoreTransferItemRow: Decodable {
+    let transfer_item_id: Int64
+    let product_id: Int
+    let quantity: Int
+    let product: TransferProductSummary?
+}
+
+private struct TransferProductSummary: Decodable {
+    let name: String?
+    let sku: String?
+}
+
+private struct StoreTransferReceiveRow: Decodable {
+    let transfer_id: Int64
+    let from_location_id: Int
+    let to_location_id: Int
+    let status: String?
+}
+
+private struct StoreTransferReceiveItemRow: Decodable {
+    let transfer_item_id: Int64
+    let product_id: Int
+    let quantity: Int
+}
+
+private struct VerifiedStoreTransferReceiveItem {
+    let transferItemId: Int64
+    let productId: Int
+    let expectedQuantity: Int
+    let receivedQuantity: Int
+}
+
+private struct StoreTransferItemQuantityUpdate: Encodable {
+    let quantity: Int
+}
+
+private struct StoreTransferReceiveUpdate: Encodable {
+    let status: String
+    let received_at: String
+    let received_by_user_id: Int
+    let received_by_name: String
+    let receive_id: String
 }
 
 struct ReturnLookupSale: Decodable {

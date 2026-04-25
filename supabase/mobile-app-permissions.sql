@@ -68,6 +68,7 @@ values
   ('inventory', 'View Inventory List', 'Inventory', 100),
   ('receiving', 'Receiving Inventory', 'Inventory', 110),
   ('store_transfer', 'Store Transfer', 'Inventory', 120),
+  ('verify_store_transfer_quantity', 'Verify Store Transfer Quantity', 'Inventory', 121),
   ('edit_item', 'Edit Item', 'Inventory', 130),
   ('new_item', 'Add New Item', 'Inventory', 140),
   ('hardware_setup', 'Hardware Setup', 'Device', 310),

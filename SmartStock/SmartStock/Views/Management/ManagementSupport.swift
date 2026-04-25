@@ -46,6 +46,8 @@ struct ReceivingHistoryRow: Decodable, Identifiable {
     let reason: String
     let note: String?
     let createdAt: String?
+    let receiveId: String?
+    let userName: String?
     let products: ReceivingHistoryProduct?
     let locations: ReceivingHistoryLocation?
 
@@ -55,6 +57,8 @@ struct ReceivingHistoryRow: Decodable, Identifiable {
         case reason
         case note
         case createdAt = "created_at"
+        case receiveId = "receive_id"
+        case userName = "user_name"
         case products
         case locations
     }
@@ -62,7 +66,49 @@ struct ReceivingHistoryRow: Decodable, Identifiable {
     var productName: String { products?.name ?? "Unknown Product" }
     var storeName: String { locations?.name ?? "Unknown Store" }
     var quantityText: String { changeQty > 0 ? "+\(changeQty)" : "\(changeQty)" }
-    var reasonText: String { reason.replacingOccurrences(of: "_", with: " ").capitalized }
+
+    var sourceText: String {
+        switch reason.uppercased() {
+        case "RECEIVE":
+            return "Receiving"
+        case "INVENTORY_ENTRY":
+            return transferIdFromNote == nil ? "Receiving" : "Store Transfer"
+        default:
+            return reason.replacingOccurrences(of: "_", with: " ").capitalized
+        }
+    }
+
+    var receiveIdText: String? {
+        let trimmed = receiveId?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    var enteredByText: String? {
+        let trimmed = userName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    var noteText: String? {
+        let trimmed = note?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if trimmed.isEmpty {
+            return nil
+        }
+
+        if reason.uppercased() == "INVENTORY_ENTRY",
+           let transferId = transferIdFromNote {
+            return "Transfer #\(transferId)"
+        }
+
+        return trimmed
+    }
+
+    private var transferIdFromNote: String? {
+        guard let note else { return nil }
+        guard let range = note.range(of: "transfer_id=") else { return nil }
+        let suffix = note[range.upperBound...]
+        let transferId = suffix.prefix { $0.isNumber }
+        return transferId.isEmpty ? nil : String(transferId)
+    }
 }
 
 func normalizedValue(_ value: String) -> String? {

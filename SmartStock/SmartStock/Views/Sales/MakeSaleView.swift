@@ -11,12 +11,43 @@ import Supabase
 
 
 struct MakeSaleView: View {
+    private enum SalePaymentMethod: String, CaseIterable, Identifiable {
+        case cash = "CASH"
+        case card = "CARD"
+        case cheque = "CHEQUE"
+        case account = "ACCOUNT"
+
+        var id: String { rawValue }
+
+        var title: String {
+            switch self {
+            case .cash: return "Cash"
+            case .card: return "Card"
+            case .cheque: return "Cheque"
+            case .account: return "Account Credit"
+            }
+        }
+
+        var checkoutMethod: CheckoutPaymentMethod {
+            switch self {
+            case .cash: return .cash
+            case .card: return .card
+            case .cheque: return .cheque
+            case .account: return .account
+            }
+        }
+    }
+
     @EnvironmentObject var sessionManager: SessionManager
 
     @State private var searchText = ""
     @State private var products: [Product] = []
     @State private var cart: [CartItem] = []
-    @State private var discountText = ""
+    @State private var paymentMethod: SalePaymentMethod = .cash
+    @State private var customerAccounts: [CustomerAccount] = []
+    @State private var selectedCustomerAccountId: Int?
+    @State private var cashCollectedText = ""
+    @State private var isShowingCheckoutSheet = false
     @State private var isCheckingOut = false
     @State private var checkoutMessage: String?
     @State private var checkoutError: String?
@@ -176,15 +207,15 @@ struct MakeSaleView: View {
                                         Text(item.product.name)
                                             .font(.headline)
 
-                                        Text("$\(item.unitPrice, specifier: "%.2f") each")
-                                            .font(.subheadline)
-                                            .foregroundColor(.secondary)
-
                                         if item.discountAmount > 0 {
                                             Text("Item discount: -$\(item.discountAmount, specifier: "%.2f")")
                                                 .font(.caption)
-                                                .foregroundColor(.secondary)
+                                                .foregroundColor(.orange)
                                         }
+
+                                        Text("$\(item.unitPrice, specifier: "%.2f") each")
+                                            .font(.subheadline)
+                                            .foregroundColor(.secondary)
                                     }
 
                                     Spacer()
@@ -244,23 +275,19 @@ struct MakeSaleView: View {
                     Divider()
 
                     VStack {
-                        if canApplySaleDiscount {
-                            TextField("Discount", text: $discountText)
-                                .keyboardType(.decimalPad)
-                                .textFieldStyle(.roundedBorder)
+                        HStack(spacing: 16) {
+                            Text("Subtotal: $\(subtotal, specifier: "%.2f")")
+                                .font(.subheadline)
+
+                            Text("Total: $\(total, specifier: "%.2f")")
+                                .font(.headline)
                         }
 
-                        Text("Subtotal: $\(subtotal, specifier: "%.2f")")
-                            .font(.subheadline)
-
-                        if canApplySaleDiscount, discountAmount > 0 {
-                            Text("Discount: -$\(discountAmount, specifier: "%.2f")")
+                        if itemDiscountTotal > 0 {
+                            Text("Item Discounts: -$\(itemDiscountTotal, specifier: "%.2f")")
                                 .font(.subheadline)
                                 .foregroundColor(.secondary)
                         }
-
-                        Text("Total: $\(total, specifier: "%.2f")")
-                            .font(.headline)
 
                         if let checkoutError {
                             Text(checkoutError)
@@ -276,16 +303,10 @@ struct MakeSaleView: View {
                                 .multilineTextAlignment(.center)
                         }
 
-                        Button("Clear Cart") {
-                            clearCart()
-                        }
-                        .foregroundColor(.red)
-                        .disabled(cart.isEmpty || isCheckingOut)
-
                         Button {
-                            Task {
-                                await checkout()
-                            }
+                            checkoutError = nil
+                            checkoutMessage = nil
+                            isShowingCheckoutSheet = true
                         } label: {
                             if isCheckingOut {
                                 ProgressView()
@@ -304,6 +325,10 @@ struct MakeSaleView: View {
             }
             .navigationTitle("Make Sale")
             .navigationBarTitleDisplayMode(.inline)
+            .contentShape(Rectangle())
+            .onTapGesture {
+                isSearchFieldFocused = false
+            }
             .alert("Change Item Price", isPresented: isEditingItemPrice) {
                 TextField("Unit price", text: $editedUnitPriceText)
                     .keyboardType(.decimalPad)
@@ -331,6 +356,33 @@ struct MakeSaleView: View {
             .onDisappear {
                 searchTask?.cancel()
             }
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                VStack(spacing: 6) {
+                    Spacer()
+                        .frame(height: 18)
+
+                    Button("Clear Cart") {
+                        clearCart()
+                    }
+                    .font(.headline)
+                    .foregroundColor(.red)
+                    .disabled(cart.isEmpty || isCheckingOut)
+                }
+                .frame(maxWidth: .infinity)
+                .background(Color(.systemBackground))
+            }
+            .ignoresSafeArea(.keyboard, edges: .bottom)
+            .sheet(isPresented: $isShowingCheckoutSheet) {
+                checkoutSheet
+            }
+            .onChange(of: paymentMethod) { _, newMethod in
+                if newMethod == .cash {
+                    cashCollectedText = String(format: "%.2f", total)
+                }
+            }
+            .task {
+                await loadCustomerAccounts()
+            }
         }
     }
 
@@ -351,14 +403,28 @@ struct MakeSaleView: View {
     }
 
     var total: Double {
-        max(discountedCartSubtotal - discountAmount, 0)
+        max(discountedCartSubtotal, 0)
     }
 
-    var discountAmount: Double {
-        guard canApplySaleDiscount else { return 0 }
-        let trimmed = discountText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let value = Double(trimmed), value > 0 else { return 0 }
-        return min(value, discountedCartSubtotal)
+    var itemDiscountTotal: Double {
+        cart.reduce(0) { $0 + $1.discountAmount }
+    }
+
+    var selectedCustomer: CustomerAccount? {
+        guard let selectedCustomerAccountId else { return nil }
+        return customerAccounts.first(where: { $0.customerId == selectedCustomerAccountId })
+    }
+
+    var cashCollectedAmount: Double? {
+        Double(cashCollectedText.trimmingCharacters(in: .whitespacesAndNewlines))
+    }
+
+    var changeDue: Double {
+        max((cashCollectedAmount ?? 0) - total, 0)
+    }
+
+    var cashStillOwed: Double {
+        max(total - (cashCollectedAmount ?? 0), 0)
     }
 
     var isEditingItemPrice: Binding<Bool> {
@@ -435,7 +501,9 @@ struct MakeSaleView: View {
         scannerError = nil
         products = []
         cart.removeAll()
-        discountText = ""
+        paymentMethod = .cash
+        selectedCustomerAccountId = nil
+        cashCollectedText = ""
         isSearchFieldFocused = true
     }
     func handleScannedBarcode(_ code: String) async {
@@ -604,6 +672,16 @@ struct MakeSaleView: View {
               let store = sessionManager.selectedStore,
               !cart.isEmpty else { return }
 
+        if paymentMethod == .account, selectedCustomerAccountId == nil {
+            checkoutError = "Select a customer account for account billing."
+            return
+        }
+
+        if paymentMethod == .cash, (cashCollectedAmount ?? 0) < total {
+            checkoutError = "Cash collected must be at least the sale total."
+            return
+        }
+
         isCheckingOut = true
         checkoutError = nil
         checkoutMessage = nil
@@ -612,9 +690,10 @@ struct MakeSaleView: View {
         do {
             try await CheckoutService.checkout(
                 cart: cart,
-                discountAmount: discountAmount,
                 user: user,
-                store: store
+                store: store,
+                paymentMethod: paymentMethod.checkoutMethod,
+                customerAccountId: selectedCustomerAccountId
             )
 
             cart.removeAll()
@@ -622,12 +701,28 @@ struct MakeSaleView: View {
             searchText = ""
             scannedBarcode = ""
             scannerError = nil
-            discountText = ""
+            paymentMethod = .cash
+            selectedCustomerAccountId = nil
+            cashCollectedText = ""
+            isShowingCheckoutSheet = false
             isSearchFieldFocused = true
             checkoutMessage = "Sale completed successfully."
         } catch {
             checkoutError = error.localizedDescription
             print("CHECKOUT ERROR:", error)
+        }
+    }
+
+    func loadCustomerAccounts() async {
+        do {
+            customerAccounts = try await supabase
+                .from("customer_accounts")
+                .select("customer_id, account_number, name, phone, email, credit_limit, current_balance, is_active, is_business, account_notes, customer_type_id, created_at")
+                .order("name", ascending: true)
+                .execute()
+                .value
+        } catch {
+            print("LOAD SALE CUSTOMER ACCOUNTS ERROR:", error)
         }
     }
 
@@ -664,5 +759,85 @@ struct MakeSaleView: View {
 
         cart[index].discountAmount = min(newDiscount, cart[index].subtotal)
         self.editingDiscountItemID = nil
+    }
+
+    private var checkoutSheet: some View {
+        NavigationStack {
+            Form {
+                Section("Payment") {
+                    Picker("Method", selection: $paymentMethod) {
+                        ForEach(SalePaymentMethod.allCases) { method in
+                            Text(method.title).tag(method)
+                        }
+                    }
+                    .pickerStyle(.inline)
+                }
+
+                if paymentMethod == .cash {
+                    Section("Cash Collected") {
+                        TextField("Cash received", text: $cashCollectedText)
+                            .keyboardType(.decimalPad)
+
+                        LabeledContent("Total Due", value: String(format: "$%.2f", total))
+
+                        if cashStillOwed > 0 {
+                            LabeledContent("Still Owed", value: String(format: "$%.2f", cashStillOwed))
+                                .foregroundStyle(.red)
+                        } else {
+                            LabeledContent("Change Due", value: String(format: "$%.2f", changeDue))
+                        }
+                    }
+                }
+
+                Section(paymentMethod == .account ? "Customer Account" : "Customer Account (Optional)") {
+                    Picker("Customer", selection: $selectedCustomerAccountId) {
+                        Text(paymentMethod == .account ? "Select customer" : "No customer").tag(Int?.none)
+                        ForEach(customerAccounts.filter(\.isActive)) { customer in
+                            Text(customer.name).tag(Int?.some(customer.customerId))
+                        }
+                    }
+
+                    if let selectedCustomer = selectedCustomer {
+                        LabeledContent("Current Balance", value: selectedCustomer.balanceText)
+                        LabeledContent("Credit Limit", value: selectedCustomer.creditLimitText)
+                    }
+                }
+
+                Section("Sale Summary") {
+                    LabeledContent("Subtotal", value: String(format: "$%.2f", subtotal))
+                    if itemDiscountTotal > 0 {
+                        LabeledContent("Item Discounts", value: String(format: "-$%.2f", itemDiscountTotal))
+                    }
+                    LabeledContent("Total", value: String(format: "$%.2f", total))
+                }
+            }
+            .navigationTitle("Checkout")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") {
+                        isShowingCheckoutSheet = false
+                    }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Complete Sale") {
+                        Task {
+                            await checkout()
+                        }
+                    }
+                    .disabled(
+                        isCheckingOut
+                        || (paymentMethod == .account && selectedCustomerAccountId == nil)
+                        || (paymentMethod == .cash && (cashCollectedAmount ?? 0) < total)
+                    )
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
+        .onAppear {
+            if cashCollectedText.isEmpty {
+                cashCollectedText = String(format: "%.2f", total)
+            }
+        }
     }
 }

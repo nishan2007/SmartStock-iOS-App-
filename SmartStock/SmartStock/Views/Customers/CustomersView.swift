@@ -220,6 +220,10 @@ struct CustomersView: View {
                 Text(customer.name)
                     .font(.headline)
 
+                if (customer.currentBalance ?? 0) > 0 {
+                    statusBadge(title: "Open Balance", color: .orange)
+                }
+
                 if !customer.isActive {
                     statusBadge(title: "Inactive", color: .red)
                 } else if customer.isBusiness {

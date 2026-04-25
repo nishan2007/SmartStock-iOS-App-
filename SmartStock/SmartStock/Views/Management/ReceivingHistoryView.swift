@@ -40,10 +40,20 @@ struct ReceivingHistoryView: View {
                                 Text(row.quantityText)
                                     .font(.headline)
                             }
-                            Text("\(row.storeName) • \(row.reasonText)")
+                            Text("\(row.storeName) • \(row.sourceText)")
                                 .font(.subheadline)
                                 .foregroundStyle(.secondary)
-                            if let note = row.note, !note.isEmpty {
+                            if let receiveId = row.receiveIdText {
+                                Text("Receive ID: \(receiveId)")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            if let enteredBy = row.enteredByText {
+                                Text("Entered By: \(enteredBy)")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            if let note = row.noteText {
                                 Text(note)
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
@@ -71,14 +81,21 @@ struct ReceivingHistoryView: View {
     }
 
     private func loadHistory() async {
+        guard let selectedStore = sessionManager.selectedStore else {
+            rows = []
+            errorMessage = "Select a store to view receiving history."
+            return
+        }
+
         isLoading = true
         errorMessage = nil
         defer { isLoading = false }
         do {
             rows = try await supabase
                 .from("inventory_movements")
-                .select("movement_id, change_qty, reason, note, created_at, products(name), locations(name)")
-                .eq("reason", value: "receive")
+                .select("movement_id, change_qty, reason, note, created_at, receive_id, user_name, products(name), locations(name)")
+                .in("reason", values: ["receive", "INVENTORY_ENTRY"])
+                .eq("location_id", value: selectedStore.id)
                 .order("created_at", ascending: false)
                 .limit(200)
                 .execute()
