@@ -58,7 +58,7 @@ struct MainMenuView: View {
                             NavigationLink {
                                 ViewSalesView()
                             } label: {
-                                menuTile(title: "Sales", subtitle: "History and details", systemImage: "chart.line.uptrend.xyaxis", tint: .blue)
+                                menuTile(title: "Sales", subtitle: "Sales and return history", systemImage: "chart.line.uptrend.xyaxis", tint: .blue)
                             }
                             .buttonStyle(.plain)
                         }

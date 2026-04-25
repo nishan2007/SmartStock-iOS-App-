@@ -9,17 +9,128 @@ import SwiftUI
 import Supabase
 
 struct ViewSalesView: View {
+    private enum SalesPage: String, CaseIterable {
+        case sales = "Sales"
+        case returns = "Returns"
+    }
+
     @EnvironmentObject var sessionManager: SessionManager
 
+    @State private var selectedPage: SalesPage = .sales
     @State private var sales: [Sale] = []
     @State private var isLoading = true
     @State private var errorMessage: String?
 
     var body: some View {
-        NavigationStack {
+        VStack(spacing: 0) {
+            VStack(spacing: 12) {
+                Text("Sales")
+                    .font(.largeTitle.bold())
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                pageSelector
+            }
+            .padding(.horizontal)
+            .padding(.top, 8)
+            .padding(.bottom, 12)
+
+            Divider()
+
             Group {
+                if selectedPage == .sales {
+                    salesContent
+                } else {
+                    ReturnHistoryView()
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            .transaction { transaction in
+                transaction.animation = nil
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .navigationTitle("")
+        .navigationBarTitleDisplayMode(.inline)
+        .task {
+            if selectedPage == .sales {
+                await loadSales()
+            }
+        }
+        .onAppear {
+            if !availablePages.contains(selectedPage), let firstPage = availablePages.first {
+                selectedPage = firstPage
+            }
+        }
+        .onChange(of: selectedPage) { _, newPage in
+            if newPage == .sales {
+                Task {
+                    await loadSales()
+                }
+            }
+        }
+    }
+
+    private var canViewSales: Bool {
+        sessionManager.currentUser?.canAccess(.viewSales) == true
+    }
+
+    private var canViewReturnHistory: Bool {
+        sessionManager.currentUser?.canAccess(.viewSales) == true
+    }
+
+    private var availablePages: [SalesPage] {
+        SalesPage.allCases.filter { page in
+            switch page {
+            case .sales:
+                return canViewSales
+            case .returns:
+                return canViewReturnHistory
+            }
+        }
+    }
+
+    private var pageSelector: some View {
+        GeometryReader { proxy in
+            let pages = availablePages
+            let selectedIndex = pages.firstIndex(of: selectedPage) ?? 0
+            let segmentWidth = max((proxy.size.width - 12) / CGFloat(max(pages.count, 1)), 0)
+
+            ZStack(alignment: .leading) {
+                if !pages.isEmpty {
+                    Capsule()
+                        .fill(Color(.secondarySystemBackground))
+                        .frame(width: segmentWidth, height: 34)
+                        .offset(x: 6 + (segmentWidth * CGFloat(selectedIndex)))
+                        .animation(.spring(response: 0.3, dampingFraction: 0.86), value: selectedPage)
+                }
+
+                HStack(spacing: 0) {
+                    ForEach(pages, id: \.self) { page in
+                        Button {
+                            selectedPage = page
+                        } label: {
+                            Text(page.rawValue)
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(selectedPage == page ? Color.primary : .secondary)
+                                .frame(maxWidth: .infinity, minHeight: 34)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+            .padding(6)
+            .background(Color(.tertiarySystemBackground))
+            .clipShape(Capsule())
+        }
+        .frame(height: 46)
+    }
+
+    private var salesContent: some View {
+        Group {
                 if isLoading {
                     ProgressView("Loading sales...")
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
                 } else if let errorMessage {
                     VStack(spacing: 12) {
                         Text("Unable to load sales")
@@ -35,6 +146,7 @@ struct ViewSalesView: View {
                         .buttonStyle(.borderedProminent)
                     }
                     .padding()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
                 } else if sales.isEmpty {
                     VStack(spacing: 12) {
                         Text("No sales found")
@@ -44,6 +156,7 @@ struct ViewSalesView: View {
                             .multilineTextAlignment(.center)
                     }
                     .padding()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
                 } else {
                     List(sales) { sale in
                         NavigationLink {
@@ -62,17 +175,20 @@ struct ViewSalesView: View {
                                     .font(.subheadline)
                                     .foregroundColor(.secondary)
 
-                                HStack(spacing: 12) {
+                                VStack(alignment: .leading, spacing: 4) {
                                     Label(sale.cashierName, systemImage: "person")
-                                    Label(sale.sourceText, systemImage: "iphone")
+
+                                    HStack(spacing: 6) {
+                                        Image(systemName: sale.sourceSystemImage)
+                                            .accessibilityLabel(sale.sourceText)
+                                        Text(sale.receiptNumberText)
+                                    }
                                 }
                                 .font(.subheadline)
                                 .foregroundColor(.secondary)
 
                                 HStack {
-                                    Text(sale.storeName)
-                                        .font(.subheadline)
-                                        .foregroundColor(.secondary)
+                                    Label(sale.storeName, systemImage: "storefront")
 
                                     Spacer()
 
@@ -86,6 +202,16 @@ struct ViewSalesView: View {
                                             .clipShape(Capsule())
                                     }
                                 }
+                                .font(.subheadline)
+                                .foregroundColor(.secondary)
+
+                                HStack {
+                                    Text(sale.paymentMethodText)
+                                    Spacer()
+                                    Text(sale.itemCountText)
+                                }
+                                .font(.caption)
+                                .foregroundColor(.secondary)
                             }
                             .padding(.vertical, 4)
                         }
@@ -95,11 +221,6 @@ struct ViewSalesView: View {
                     }
                 }
             }
-            .navigationTitle("View Sales")
-            .task {
-                await loadSales()
-            }
-        }
     }
 
     private func loadSales() async {
@@ -116,7 +237,7 @@ struct ViewSalesView: View {
         do {
             sales = try await supabase
                 .from("sales")
-                .select("sale_id, total_amount, status, transaction_source, created_at, payment_status, returned_amount, receipt_number, receipt_device_id, receipt_sequence, users(full_name), locations(name), customer_accounts(name)")
+                .select("sale_id, total_amount, status, payment_method, transaction_source, created_at, payment_status, returned_amount, receipt_number, receipt_device_id, receipt_sequence, users(full_name), locations(name), customer_accounts(name), sale_items(quantity)")
                 .eq("location_id", value: store.id)
                 .order("sale_id", ascending: false)
                 .execute()

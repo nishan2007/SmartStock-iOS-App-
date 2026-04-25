@@ -20,10 +20,15 @@ struct SaleCustomerAccount: Decodable {
     let name: String?
 }
 
+struct SaleItemSummary: Decodable {
+    let quantity: Int?
+}
+
 struct Sale: Decodable, Identifiable {
     let sale_id: Int
     let total_amount: Double?
     let status: String?
+    let payment_method: String?
     let transaction_source: String?
     let created_at: String?
     let payment_status: String?
@@ -34,6 +39,7 @@ struct Sale: Decodable, Identifiable {
     let users: SaleUser?
     let locations: SaleLocation?
     let customer_accounts: SaleCustomerAccount?
+    let sale_items: [SaleItemSummary]?
 
     var id: Int { sale_id }
 
@@ -62,6 +68,11 @@ struct Sale: Decodable, Identifiable {
         return trimmed.isEmpty ? "Unknown" : trimmed.replacingOccurrences(of: "_", with: " ").capitalized
     }
 
+    var paymentMethodText: String {
+        let trimmed = payment_method?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return trimmed.isEmpty ? "Unknown Payment" : trimmed.replacingOccurrences(of: "_", with: " ").capitalized
+    }
+
     var receiptNumberText: String {
         let trimmed = receipt_number?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         return trimmed.isEmpty ? "Unavailable" : trimmed
@@ -71,12 +82,23 @@ struct Sale: Decodable, Identifiable {
         switch transaction_source?.lowercased() {
         case "mobile_app":
             return "Mobile App"
-        case "desktop_app":
+        case "java_app", "desktop_app":
             return "Desktop App"
         case let value? where !value.isEmpty:
             return value.replacingOccurrences(of: "_", with: " ").capitalized
         default:
             return "Unknown Source"
+        }
+    }
+
+    var sourceSystemImage: String {
+        switch transaction_source?.lowercased() {
+        case "mobile_app":
+            return "iphone"
+        case "java_app", "desktop_app":
+            return "desktopcomputer"
+        default:
+            return "questionmark.app"
         }
     }
 
@@ -87,6 +109,14 @@ struct Sale: Decodable, Identifiable {
     var customerAccountName: String {
         let trimmed = customer_accounts?.name?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         return trimmed.isEmpty ? "Walk-in / Not provided" : trimmed
+    }
+
+    var itemCount: Int {
+        sale_items?.reduce(0) { $0 + ($1.quantity ?? 0) } ?? 0
+    }
+
+    var itemCountText: String {
+        "\(itemCount) item\(itemCount == 1 ? "" : "s")"
     }
 
     private static let displayFormatter: DateFormatter = {

@@ -81,7 +81,7 @@ private struct DeviceRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Text(device.deviceName ?? "Unnamed Device")
+                Text(device.modelName)
                     .font(.headline)
 
                 if isCurrent {
@@ -94,6 +94,12 @@ private struct DeviceRow: View {
                 }
 
                 Spacer()
+            }
+
+            if let deviceName = device.deviceName, deviceName != device.modelName {
+                Text(deviceName)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
             }
 
             HStack(spacing: 8) {
@@ -117,7 +123,7 @@ private struct DeviceRow: View {
         let platform = [device.osName, device.osVersion].compactMap { $0 }.joined(separator: " ")
         let user = device.lastLoginUserName ?? "No recent user"
         let lastSeen = device.lastSeen.formatted(date: .abbreviated, time: .shortened)
-        return [platform, user, "Seen \(lastSeen)"].filter { !$0.isEmpty }.joined(separator: " • ")
+        return [platform, device.modelIdentifier, user, "Seen \(lastSeen)"].filter { !$0.isEmpty }.joined(separator: " • ")
     }
 
     private func statusBadge(title: String, color: Color) -> some View {
@@ -178,6 +184,8 @@ private struct DeviceDetailView: View {
             }
 
             Section("Device Info") {
+                detailRow("Model", device.modelName)
+                detailRow("Identifier", device.modelIdentifier)
                 detailRow("Name", device.deviceName ?? "Unknown")
                 detailRow("Installation ID", device.installationId)
                 detailRow("Platform", [device.osName, device.osVersion].compactMap { $0 }.joined(separator: " "))

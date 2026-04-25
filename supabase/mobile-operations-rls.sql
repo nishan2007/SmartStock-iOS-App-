@@ -185,6 +185,21 @@ as $$
     )
 $$;
 
+create or replace function public.current_app_user_can_return_at_location(target_location_id int)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select
+    public.current_app_user_has_location(target_location_id)
+    and (
+      coalesce(public.current_app_user_is_admin(), false)
+      or public.current_app_user_has_mobile_permission('returns')
+    )
+$$;
+
 create or replace function public.current_app_user_can_receive_at_location(target_location_id int)
 returns boolean
 language sql
@@ -304,6 +319,7 @@ revoke all on function public.current_app_user_can_edit_products() from public;
 revoke all on function public.current_app_user_can_manage_inventory_for_location(int) from public;
 revoke all on function public.current_app_user_can_sell_at_location(int) from public;
 revoke all on function public.current_app_user_can_view_sales_at_location(int) from public;
+revoke all on function public.current_app_user_can_return_at_location(int) from public;
 revoke all on function public.current_app_user_can_receive_at_location(int) from public;
 revoke all on function public.current_app_user_can_view_receiving_at_location(int) from public;
 revoke all on function public.current_app_user_can_create_store_transfer(int, int) from public;
@@ -324,6 +340,7 @@ grant execute on function public.current_app_user_can_edit_products() to authent
 grant execute on function public.current_app_user_can_manage_inventory_for_location(int) to authenticated;
 grant execute on function public.current_app_user_can_sell_at_location(int) to authenticated;
 grant execute on function public.current_app_user_can_view_sales_at_location(int) to authenticated;
+grant execute on function public.current_app_user_can_return_at_location(int) to authenticated;
 grant execute on function public.current_app_user_can_receive_at_location(int) to authenticated;
 grant execute on function public.current_app_user_can_view_receiving_at_location(int) to authenticated;
 grant execute on function public.current_app_user_can_create_store_transfer(int, int) to authenticated;
@@ -340,6 +357,8 @@ alter table public.product_barcodes enable row level security;
 alter table public.receiving_batches enable row level security;
 alter table public.sales enable row level security;
 alter table public.sale_items enable row level security;
+alter table public.sale_returns enable row level security;
+alter table public.sale_return_items enable row level security;
 alter table public.store_transfers enable row level security;
 alter table public.store_transfer_items enable row level security;
 
@@ -377,6 +396,10 @@ drop policy if exists "Users can read sales at allowed stores" on public.sales;
 drop policy if exists "Users can insert sales at allowed stores" on public.sales;
 drop policy if exists "Users can read sale items for allowed sales" on public.sale_items;
 drop policy if exists "Users can insert sale items for allowed sales" on public.sale_items;
+drop policy if exists "Users can read returns at allowed stores" on public.sale_returns;
+drop policy if exists "Users can insert returns at allowed stores" on public.sale_returns;
+drop policy if exists "Users can read return items for allowed returns" on public.sale_return_items;
+drop policy if exists "Users can insert return items for allowed returns" on public.sale_return_items;
 
 drop policy if exists "Users can read store transfers they can access" on public.store_transfers;
 drop policy if exists "Users can create store transfers between assigned stores" on public.store_transfers;
@@ -438,6 +461,7 @@ using (
   and (
     (reason in ('receive', 'INVENTORY_ENTRY') and public.current_app_user_can_view_receiving_at_location(location_id))
     or (reason in ('sale', 'SALE') and public.current_app_user_can_view_sales_at_location(location_id))
+    or (reason in ('return', 'RETURN') and public.current_app_user_can_view_sales_at_location(location_id))
     or (reason in ('TRANSFER_OUT', 'INVENTORY_ENTRY', 'TRANSFER_ADJUSTMENT') and public.current_app_user_can_view_inventory())
     or (reason in ('NEW_ITEM', 'MANUAL_ADJUSTMENT') and public.current_app_user_can_view_inventory())
     or (reason not in ('receive', 'sale', 'SALE', 'NEW_ITEM', 'MANUAL_ADJUSTMENT') and public.current_app_user_can_view_inventory())
@@ -453,6 +477,7 @@ with check (
   and (
     (reason in ('receive', 'INVENTORY_ENTRY') and public.current_app_user_can_receive_at_location(location_id))
     or (reason in ('sale', 'SALE') and public.current_app_user_can_sell_at_location(location_id))
+    or (reason in ('return', 'RETURN') and public.current_app_user_can_return_at_location(location_id))
     or (reason in ('TRANSFER_OUT', 'INVENTORY_ENTRY', 'TRANSFER_ADJUSTMENT') and public.current_app_user_can_manage_inventory_for_location(location_id))
     or (reason in ('NEW_ITEM', 'MANUAL_ADJUSTMENT') and public.current_app_user_can_manage_inventory_for_location(location_id))
   )
@@ -568,6 +593,48 @@ with check (
     where s.sale_id = sale_items.sale_id
       and s.user_id = public.current_app_user_id()
       and public.current_app_user_can_sell_at_location(s.location_id)
+  )
+);
+
+create policy "Users can read returns at allowed stores"
+on public.sale_returns
+for select
+to authenticated
+using (public.current_app_user_can_view_sales_at_location(location_id));
+
+create policy "Users can insert returns at allowed stores"
+on public.sale_returns
+for insert
+to authenticated
+with check (
+  user_id = public.current_app_user_id()
+  and public.current_app_user_can_return_at_location(location_id)
+);
+
+create policy "Users can read return items for allowed returns"
+on public.sale_return_items
+for select
+to authenticated
+using (
+  exists (
+    select 1
+    from public.sale_returns sr
+    where sr.return_id = sale_return_items.return_id
+      and public.current_app_user_can_view_sales_at_location(sr.location_id)
+  )
+);
+
+create policy "Users can insert return items for allowed returns"
+on public.sale_return_items
+for insert
+to authenticated
+with check (
+  exists (
+    select 1
+    from public.sale_returns sr
+    where sr.return_id = sale_return_items.return_id
+      and sr.user_id = public.current_app_user_id()
+      and public.current_app_user_can_return_at_location(sr.location_id)
   )
 );
 

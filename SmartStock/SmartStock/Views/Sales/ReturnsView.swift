@@ -94,7 +94,6 @@ struct ReturnsView: View {
                 .disabled(isSubmitting)
             }
         }
-        .navigationTitle("Returns")
         .sheet(isPresented: $isShowingScanner) {
             BarcodeScannerSheet(
                 scannedCode: $barcode,

@@ -368,6 +368,8 @@ private struct DeviceCreatePayload: Encodable {
     let macAddresses: String?
     let lastLoginUserId: Int?
     let lastStoreId: Int?
+    let firstSeen: String
+    let lastSeen: String
     let isApproved: Bool
     let isBlocked: Bool
 
@@ -385,6 +387,8 @@ private struct DeviceCreatePayload: Encodable {
         case macAddresses = "mac_addresses"
         case lastLoginUserId = "last_login_user_id"
         case lastStoreId = "last_store_id"
+        case firstSeen = "first_seen"
+        case lastSeen = "last_seen"
         case isApproved = "is_approved"
         case isBlocked = "is_blocked"
     }
@@ -403,6 +407,9 @@ private struct DeviceCreatePayload: Encodable {
         macAddresses = info.macAddresses
         lastLoginUserId = userId
         lastStoreId = storeId
+        let now = ISO8601DateFormatter().string(from: Date())
+        firstSeen = now
+        lastSeen = now
         isApproved = false
         isBlocked = false
     }
@@ -489,6 +496,13 @@ private struct DeviceSessionEndPayload: Encodable {
 
 private extension ProcessInfo {
     var machineHardwareName: String {
+        #if targetEnvironment(simulator)
+        if let simulatedModelIdentifier = environment["SIMULATOR_MODEL_IDENTIFIER"],
+           !simulatedModelIdentifier.isEmpty {
+            return simulatedModelIdentifier
+        }
+        #endif
+
         var systemInfo = utsname()
         uname(&systemInfo)
         let mirror = Mirror(reflecting: systemInfo.machine)
