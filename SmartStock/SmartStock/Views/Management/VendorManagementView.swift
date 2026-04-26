@@ -30,13 +30,20 @@ struct VendorManagementView: View {
                 } else {
                     ForEach(vendors) { vendor in
                         HStack {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(vendor.name)
-                                Text(vendor.isActive ? "Active" : "Inactive")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
+                            NavigationLink {
+                                VendorItemsView(vendor: vendor)
+                                    .environmentObject(sessionManager)
+                            } label: {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(vendor.name)
+                                    Text(vendor.isActive ? "Active" : "Inactive")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
                             }
+
                             Spacer()
+
                             if canManageVendors {
                                 Button("Edit") {
                                     editingVendor = vendor
@@ -44,6 +51,7 @@ struct VendorManagementView: View {
                                     editingIsActive = vendor.isActive
                                 }
                                 .font(.caption.weight(.semibold))
+                                .buttonStyle(.borderless)
                             }
                         }
                     }

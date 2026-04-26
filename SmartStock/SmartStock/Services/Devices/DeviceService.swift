@@ -124,6 +124,7 @@ final class DeviceService {
                 .value
         }
 
+        try await endActiveDeviceSessions(deviceId: device.id, excludingSessionId: nil)
         let sessionId = try await startDeviceSession(deviceId: device.id, userId: userId, storeId: storeId)
         return DeviceRegistrationResult(device: device, sessionId: sessionId)
     }
@@ -156,6 +157,7 @@ final class DeviceService {
             .from("device_sessions")
             .update(DeviceSessionEndPayload())
             .eq("session_id", value: Int(sessionId))
+            .eq("session_status", value: "ACTIVE")
             .execute()
     }
 
@@ -181,15 +183,34 @@ final class DeviceService {
         return try decoder.decode([TrackedDeviceSession].self, from: response.data)
     }
 
-    func updateDeviceAccess(deviceId: UUID, isApproved: Bool, isBlocked: Bool, notes: String?) async throws -> TrackedDevice {
+    func updateDeviceAccess(deviceId: UUID, isApproved: Bool, isBlocked: Bool, notes: String?, assignedLocationId: Int?) async throws -> TrackedDevice {
         try await client
             .from("devices")
-            .update(DeviceAccessUpdatePayload(isApproved: isApproved, isBlocked: isBlocked, statusNotes: notes))
+            .update(DeviceAccessUpdatePayload(isApproved: isApproved, isBlocked: isBlocked, statusNotes: notes, assignedLocationId: assignedLocationId))
             .eq("device_id", value: deviceId.uuidString)
             .select(deviceSelectColumns)
             .single()
             .execute()
             .value
+    }
+
+    func endActiveDeviceSessions(deviceId: UUID, excludingSessionId: Int64?) async throws {
+        if let excludingSessionId {
+            _ = try await client
+                .from("device_sessions")
+                .update(DeviceSessionEndPayload())
+                .eq("device_id", value: deviceId.uuidString)
+                .eq("session_status", value: "ACTIVE")
+                .neq("session_id", value: Int(excludingSessionId))
+                .execute()
+        } else {
+            _ = try await client
+                .from("device_sessions")
+                .update(DeviceSessionEndPayload())
+                .eq("device_id", value: deviceId.uuidString)
+                .eq("session_status", value: "ACTIVE")
+                .execute()
+        }
     }
 
     private func startDeviceSession(deviceId: UUID, userId: Int?, storeId: Int?) async throws -> Int64 {
@@ -267,11 +288,12 @@ final class DeviceService {
         last_seen,
         last_login_user_id,
         last_store_id,
+        assigned_location_id,
         is_approved,
         is_blocked,
         status_notes,
         last_login_user:users!devices_last_login_user_id_fkey(full_name),
-        last_store:locations(name)
+        last_store:locations!devices_last_store_id_fkey(name)
         """
     }
 
@@ -437,11 +459,13 @@ private struct DeviceAccessUpdatePayload: Encodable {
     let isApproved: Bool
     let isBlocked: Bool
     let statusNotes: String?
+    let assignedLocationId: Int?
 
     enum CodingKeys: String, CodingKey {
         case isApproved = "is_approved"
         case isBlocked = "is_blocked"
         case statusNotes = "status_notes"
+        case assignedLocationId = "assigned_location_id"
     }
 }
 

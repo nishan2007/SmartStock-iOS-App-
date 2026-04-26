@@ -135,7 +135,7 @@ struct MainMenuView: View {
                             .buttonStyle(.plain)
                         }
 
-                        if canAccess(.changeStore) {
+                        if canAccess(.changeStore) && !sessionManager.isCurrentDeviceStoreRestricted {
                             NavigationLink {
                                 StoreSelectionView()
                                     .environmentObject(sessionManager)

@@ -24,6 +24,7 @@ struct TrackedDevice: Identifiable, Decodable, Equatable {
     let lastLoginUserName: String?
     let lastStoreId: Int?
     let lastStoreName: String?
+    let assignedLocationId: Int?
     let isApproved: Bool
     let isBlocked: Bool
     let notes: String?
@@ -54,6 +55,7 @@ struct TrackedDevice: Identifiable, Decodable, Equatable {
         case lastSeen = "last_seen"
         case lastLoginUserId = "last_login_user_id"
         case lastStoreId = "last_store_id"
+        case assignedLocationId = "assigned_location_id"
         case isApproved = "is_approved"
         case isBlocked = "is_blocked"
         case notes
@@ -81,6 +83,7 @@ struct TrackedDevice: Identifiable, Decodable, Equatable {
         lastLoginUserName: String?,
         lastStoreId: Int?,
         lastStoreName: String?,
+        assignedLocationId: Int?,
         isApproved: Bool,
         isBlocked: Bool,
         notes: String?
@@ -103,6 +106,7 @@ struct TrackedDevice: Identifiable, Decodable, Equatable {
         self.lastLoginUserName = lastLoginUserName
         self.lastStoreId = lastStoreId
         self.lastStoreName = lastStoreName
+        self.assignedLocationId = assignedLocationId
         self.isApproved = isApproved
         self.isBlocked = isBlocked
         self.notes = notes
@@ -127,6 +131,7 @@ struct TrackedDevice: Identifiable, Decodable, Equatable {
         lastSeen = try container.decode(Date.self, forKey: .lastSeen)
         lastLoginUserId = try container.decodeIfPresent(Int.self, forKey: .lastLoginUserId)
         lastStoreId = try container.decodeIfPresent(Int.self, forKey: .lastStoreId)
+        assignedLocationId = try container.decodeIfPresent(Int.self, forKey: .assignedLocationId)
         isApproved = try container.decode(Bool.self, forKey: .isApproved)
         isBlocked = try container.decode(Bool.self, forKey: .isBlocked)
         notes = try container.decodeIfPresent(String.self, forKey: .statusNotes)
@@ -159,6 +164,7 @@ struct TrackedDevice: Identifiable, Decodable, Equatable {
             lastLoginUserName: lastLoginUserName,
             lastStoreId: lastStoreId,
             lastStoreName: lastStoreName,
+            assignedLocationId: assignedLocationId,
             isApproved: approved,
             isBlocked: blocked,
             notes: notes
@@ -185,6 +191,7 @@ struct TrackedDevice: Identifiable, Decodable, Equatable {
             lastLoginUserName: lastLoginUserName,
             lastStoreId: store?.id,
             lastStoreName: store?.name,
+            assignedLocationId: assignedLocationId,
             isApproved: isApproved,
             isBlocked: isBlocked,
             notes: notes

@@ -65,6 +65,15 @@ final class SessionManager: ObservableObject {
         currentUser?.canAccess(.localDeviceSettings) == true
     }
 
+    var isCurrentDeviceStoreRestricted: Bool {
+        currentDevice?.assignedLocationId != nil
+    }
+
+    var currentDeviceAssignedStore: Store? {
+        guard let assignedLocationId = currentDevice?.assignedLocationId else { return nil }
+        return availableStores.first { $0.id == assignedLocationId }
+    }
+
     func restoreSession() async {
         isLoading = true
         errorMessage = nil
@@ -189,6 +198,10 @@ final class SessionManager: ObservableObject {
                 errorMessage = "This device has been blocked."
                 await signOut()
             }
+        } else if currentUser != nil, device.assignedLocationId != selectedStore?.id {
+            Task {
+                await loadUserStores()
+            }
         }
     }
 
@@ -254,7 +267,14 @@ final class SessionManager: ObservableObject {
 
             availableStores = rows.map { $0.locations }
 
-            if availableStores.count == 1 {
+            if let assignedLocationId = currentDevice?.assignedLocationId {
+                if let assignedStore = availableStores.first(where: { $0.id == assignedLocationId }) {
+                    selectedStore = assignedStore
+                } else {
+                    selectedStore = nil
+                    errorMessage = "This device is restricted to a store this employee cannot access. Ask an admin to update the employee's stores or this device's assigned store."
+                }
+            } else if availableStores.count == 1 {
                 selectedStore = availableStores.first
             }
         } catch {
@@ -304,6 +324,10 @@ final class SessionManager: ObservableObject {
         do {
             guard let device = try await DeviceService.shared.fetchCurrentDevice() else { return }
             handleTrackedDeviceUpdate(device)
+            try await DeviceService.shared.endActiveDeviceSessions(
+                deviceId: device.id,
+                excludingSessionId: currentDeviceSessionId
+            )
         } catch {
             print("DEVICE ACCESS REFRESH ERROR:", error)
         }

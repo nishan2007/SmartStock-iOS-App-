@@ -9,6 +9,7 @@ struct DeviceManagementView: View {
     @EnvironmentObject private var sessionManager: SessionManager
 
     @State private var devices: [TrackedDevice] = []
+    @State private var stores: [Store] = []
     @State private var isLoading = false
     @State private var errorMessage: String?
 
@@ -33,14 +34,14 @@ struct DeviceManagementView: View {
                 Section("Tracked Devices") {
                     ForEach(devices) { device in
                         NavigationLink {
-                            DeviceDetailView(device: device) { updatedDevice in
+                            DeviceDetailView(device: device, stores: stores) { updatedDevice in
                                 if let index = devices.firstIndex(where: { $0.id == updatedDevice.id }) {
                                     devices[index] = updatedDevice
                                 }
                             }
                             .environmentObject(sessionManager)
                         } label: {
-                            DeviceRow(device: device, isCurrent: device.installationId == DeviceService.shared.currentInstallationId())
+                            DeviceRow(device: device, stores: stores, isCurrent: device.installationId == DeviceService.shared.currentInstallationId())
                         }
                     }
                 }
@@ -67,7 +68,11 @@ struct DeviceManagementView: View {
         defer { isLoading = false }
 
         do {
-            devices = try await DeviceService.shared.fetchDevices()
+            async let devicesTask = DeviceService.shared.fetchDevices()
+            async let storesTask = StoreService.shared.fetchStores()
+
+            devices = try await devicesTask
+            stores = try await storesTask
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -76,6 +81,7 @@ struct DeviceManagementView: View {
 
 private struct DeviceRow: View {
     let device: TrackedDevice
+    let stores: [Store]
     let isCurrent: Bool
 
     var body: some View {
@@ -105,6 +111,10 @@ private struct DeviceRow: View {
             HStack(spacing: 8) {
                 statusBadge(title: device.isBlocked ? "Blocked" : (device.isApproved ? "Approved" : "Shared"), color: device.isBlocked ? .red : (device.isApproved ? .green : .orange))
 
+                if let assignedStoreName {
+                    statusBadge(title: "Restricted: \(assignedStoreName)", color: .blue)
+                }
+
                 if let storeName = device.lastStoreName {
                     Text(storeName)
                         .font(.caption)
@@ -126,6 +136,11 @@ private struct DeviceRow: View {
         return [platform, device.modelIdentifier, user, "Seen \(lastSeen)"].filter { !$0.isEmpty }.joined(separator: " • ")
     }
 
+    private var assignedStoreName: String? {
+        guard let assignedLocationId = device.assignedLocationId else { return nil }
+        return stores.first { $0.id == assignedLocationId }?.name ?? "Store #\(assignedLocationId)"
+    }
+
     private func statusBadge(title: String, color: Color) -> some View {
         Text(title)
             .font(.caption.weight(.semibold))
@@ -145,18 +160,22 @@ private struct DeviceDetailView: View {
     @State private var notes: String
     @State private var isApproved: Bool
     @State private var isBlocked: Bool
+    @State private var assignedLocationId: Int?
     @State private var sessions: [TrackedDeviceSession] = []
     @State private var isLoadingSessions = false
     @State private var isSaving = false
     @State private var errorMessage: String?
 
+    let stores: [Store]
     let onSave: (TrackedDevice) -> Void
 
-    init(device: TrackedDevice, onSave: @escaping (TrackedDevice) -> Void) {
+    init(device: TrackedDevice, stores: [Store], onSave: @escaping (TrackedDevice) -> Void) {
         _device = State(initialValue: device)
         _notes = State(initialValue: device.notes ?? "")
         _isApproved = State(initialValue: device.isApproved)
         _isBlocked = State(initialValue: device.isBlocked)
+        _assignedLocationId = State(initialValue: device.assignedLocationId)
+        self.stores = stores
         self.onSave = onSave
     }
 
@@ -174,6 +193,20 @@ private struct DeviceDetailView: View {
                 Toggle("Blocked Device", isOn: $isBlocked)
 
                 Text("Unapproved devices can still be used, but they will not keep employees signed in after the app closes.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+
+            Section("Store Restriction") {
+                Picker("Assigned Store", selection: $assignedLocationId) {
+                    Text("No restriction").tag(Int?.none)
+
+                    ForEach(stores) { store in
+                        Text(store.name).tag(Optional(store.id))
+                    }
+                }
+
+                Text("When a store is assigned, employees can only use this device if they also have access to that store.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }
@@ -201,6 +234,8 @@ private struct DeviceDetailView: View {
                 if let store = device.lastStoreName {
                     detailRow("Last Store", store)
                 }
+
+                detailRow("Assigned Store", assignedStoreText)
 
                 detailRow("First Seen", device.firstSeen.formatted(date: .abbreviated, time: .shortened))
                 detailRow("Last Seen", device.lastSeen.formatted(date: .abbreviated, time: .shortened))
@@ -282,7 +317,8 @@ private struct DeviceDetailView: View {
                 deviceId: device.id,
                 isApproved: isApproved,
                 isBlocked: isBlocked,
-                notes: trimmedNotes.isEmpty ? nil : trimmedNotes
+                notes: trimmedNotes.isEmpty ? nil : trimmedNotes,
+                assignedLocationId: assignedLocationId
             )
 
             device = updatedDevice
@@ -293,6 +329,11 @@ private struct DeviceDetailView: View {
         } catch {
             errorMessage = error.localizedDescription
         }
+    }
+
+    private var assignedStoreText: String {
+        guard let assignedLocationId else { return "No restriction" }
+        return stores.first { $0.id == assignedLocationId }?.name ?? "Store #\(assignedLocationId)"
     }
 
     @ViewBuilder

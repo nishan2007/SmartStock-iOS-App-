@@ -96,7 +96,9 @@ struct InventoryItemFormView: View {
                     scannedCode: .constant(""),
                     isPresented: $isShowingScanner,
                     onScanned: { code in
-                        viewModel.applyScannedBarcode(code, to: scanTarget)
+                        Task {
+                            await viewModel.applyScannedBarcode(code, to: scanTarget)
+                        }
                     }
                 )
             }
@@ -179,9 +181,42 @@ struct InventoryItemFormView: View {
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled(true)
             barcodeField("Primary barcode", text: $viewModel.draft.barcode, target: .primary)
+
+            if viewModel.mode == .add {
+                barcodeLookupControls
+            }
+
             TextField("Description", text: $viewModel.draft.description, axis: .vertical)
                 .lineLimit(3...6)
         }
+    }
+
+    private var barcodeLookupControls: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Button {
+                Task {
+                    await viewModel.lookupBarcodeDetails()
+                }
+            } label: {
+                HStack {
+                    if viewModel.isLookingUpBarcode {
+                        ProgressView()
+                    } else {
+                        Image(systemName: "sparkle.magnifyingglass")
+                    }
+                    Text("Find Details From Barcode")
+                }
+            }
+            .buttonStyle(.bordered)
+            .disabled(viewModel.isLookingUpBarcode || viewModel.draft.barcode.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
+            if let message = viewModel.barcodeLookupMessage {
+                Text(message)
+                    .font(.caption)
+                    .foregroundStyle(message == viewModel.successfulBarcodeLookupMessage ? .green : .secondary)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var pricingSection: some View {
@@ -402,9 +437,13 @@ final class InventoryItemFormViewModel: ObservableObject {
     @Published var selectedImage: UIImage?
     @Published var errorMessage: String?
     @Published var isSaving = false
+    @Published var isLookingUpBarcode = false
+    @Published var barcodeLookupMessage: String?
 
     let mode: InventoryEditorMode
+    let successfulBarcodeLookupMessage = "Product details found. Review and edit before saving."
     private let service = InventoryEditorService()
+    private let barcodeLookupService = BarcodeProductLookupService()
     private let defaultStore: Store?
     private var didLoad = false
 
@@ -462,16 +501,63 @@ final class InventoryItemFormViewModel: ObservableObject {
         }
     }
 
-    func applyScannedBarcode(_ code: String, to target: BarcodeScanTarget) {
+    func applyScannedBarcode(_ code: String, to target: BarcodeScanTarget) async {
         let trimmed = code.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
 
         switch target {
         case .primary:
             draft.barcode = trimmed
+            if mode == .add {
+                await lookupBarcodeDetails()
+            }
         case .additional:
             let separator = draft.additionalBarcodes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "" : "\n"
             draft.additionalBarcodes += "\(separator)\(trimmed)"
+        }
+    }
+
+    func lookupBarcodeDetails() async {
+        let barcode = draft.barcode.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !barcode.isEmpty else {
+            barcodeLookupMessage = BarcodeProductLookupError.invalidBarcode.localizedDescription
+            return
+        }
+
+        isLookingUpBarcode = true
+        barcodeLookupMessage = nil
+        defer { isLookingUpBarcode = false }
+
+        do {
+            let suggestion = try await barcodeLookupService.lookup(barcode: barcode)
+            apply(suggestion)
+            barcodeLookupMessage = successfulBarcodeLookupMessage
+        } catch {
+            barcodeLookupMessage = error.localizedDescription
+        }
+    }
+
+    private func apply(_ suggestion: BarcodeProductSuggestion) {
+        draft.barcode = suggestion.barcode
+
+        if draft.sku.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            draft.sku = suggestion.barcode
+        }
+
+        if let name = suggestion.name,
+           draft.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            draft.name = name
+        }
+
+        if let description = suggestion.description,
+           draft.description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            draft.description = description
+        }
+
+        if let imageURL = suggestion.imageURL,
+           draft.imageURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+           selectedImage == nil {
+            draft.imageURL = imageURL
         }
     }
 

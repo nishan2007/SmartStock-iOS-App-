@@ -23,6 +23,22 @@ struct StoreSelectionView: View {
                         .foregroundColor(.red)
                         .multilineTextAlignment(.center)
                         .padding(.horizontal)
+                } else if let assignedStore = sessionManager.currentDeviceAssignedStore {
+                    VStack(spacing: 12) {
+                        Image(systemName: "lock.fill")
+                            .font(.title2)
+                            .foregroundStyle(.secondary)
+
+                        Text("This device is assigned to \(assignedStore.name).")
+                            .font(.headline)
+                            .multilineTextAlignment(.center)
+
+                        Button("Continue") {
+                            sessionManager.selectedStore = assignedStore
+                        }
+                        .buttonStyle(.borderedProminent)
+                    }
+                    .padding(.horizontal)
                 } else if sessionManager.availableStores.isEmpty {
                     Text("No stores found for this user.")
                         .foregroundColor(.secondary)
