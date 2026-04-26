@@ -33,6 +33,27 @@ final class RoleService {
         }
     }
 
+    func fetchAvailableMobilePermissions() async throws -> [RolePermissionDefinition] {
+        let rows: [MobilePermissionDefinitionDTO] = try await client
+            .from("mobile_permissions")
+            .select("permission_key, display_name, permission_group, sort_order, description")
+            .order("sort_order", ascending: true)
+            .execute()
+            .value
+
+        return rows.compactMap { row in
+            guard let permission = MobilePermission(rawValue: row.permission_key) else { return nil }
+
+            return RolePermissionDefinition(
+                permission: permission,
+                title: row.display_name,
+                groupTitle: row.permission_group,
+                sortOrder: row.sort_order,
+                description: row.description
+            )
+        }
+    }
+
     func fetchMobilePermissions(roleId: Int) async throws -> Set<MobilePermission> {
         let rows: [RoleMobilePermissionRowDTO] = try await client
             .from("role_mobile_permissions")
@@ -82,9 +103,27 @@ final class RoleService {
     }
 }
 
+struct RolePermissionDefinition: Identifiable, Hashable {
+    let permission: MobilePermission
+    let title: String
+    let groupTitle: String
+    let sortOrder: Int
+    let description: String?
+
+    var id: String { permission.rawValue }
+}
+
 private struct RoleRowDTO: Decodable {
     let role_id: Int
     let role_name: String
+}
+
+private struct MobilePermissionDefinitionDTO: Decodable {
+    let permission_key: String
+    let display_name: String
+    let permission_group: String
+    let sort_order: Int
+    let description: String?
 }
 
 private struct RoleMobilePermissionRowDTO: Decodable {

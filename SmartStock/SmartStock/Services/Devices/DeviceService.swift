@@ -96,7 +96,10 @@ final class DeviceService {
     }
 
     func registerCurrentDevice(userId: Int?, storeId: Int?) async throws -> DeviceRegistrationResult {
-        let info = collectDeviceInfo()
+        let receiptDeviceName = await MainActor.run {
+            ReceiptNumberManager.shared.currentDeviceId()
+        }
+        let info = collectDeviceInfo(localUsername: receiptDeviceName)
 
         let existing = try await fetchDevice(installationId: info.installationId)
 
@@ -137,6 +140,17 @@ final class DeviceService {
         try await client
             .from("devices")
             .update(DeviceContextUpdatePayload(userId: userId, storeId: storeId))
+            .eq("device_id", value: deviceId.uuidString)
+            .select(deviceSelectColumns)
+            .single()
+            .execute()
+            .value
+    }
+
+    func updateCurrentDeviceLocalUsername(deviceId: UUID, localUsername: String?) async throws -> TrackedDevice {
+        try await client
+            .from("devices")
+            .update(DeviceLocalUsernameUpdatePayload(localUsername: localUsername))
             .eq("device_id", value: deviceId.uuidString)
             .select(deviceSelectColumns)
             .single()
@@ -237,7 +251,7 @@ final class DeviceService {
         return devices.first
     }
 
-    private func collectDeviceInfo() -> DeviceInfoSnapshot {
+    private func collectDeviceInfo(localUsername: String?) -> DeviceInfoSnapshot {
         let device = UIDevice.current
         let installationId = currentInstallationId()
         let appVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
@@ -265,7 +279,7 @@ final class DeviceService {
             osArch: osArch,
             javaVersion: nil,
             appVersion: versionText,
-            localUsername: nil,
+            localUsername: localUsername,
             macAddresses: nil
         )
     }
@@ -452,6 +466,14 @@ private struct DeviceContextUpdatePayload: Encodable {
         lastSeen = ISO8601DateFormatter().string(from: Date())
         lastLoginUserId = userId
         lastStoreId = storeId
+    }
+}
+
+private struct DeviceLocalUsernameUpdatePayload: Encodable {
+    let localUsername: String?
+
+    enum CodingKeys: String, CodingKey {
+        case localUsername = "local_username"
     }
 }
 
