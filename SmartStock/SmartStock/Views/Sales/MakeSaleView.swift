@@ -69,7 +69,7 @@ struct MakeSaleView: View {
                 // 🔍 Search Bar + Overlay Results
                 ZStack(alignment: .top) {
                     VStack(spacing: 0) {
-                        HStack(spacing: 14) {
+                        HStack(spacing: 12) {
                             Image(systemName: "magnifyingglass")
                                 .font(.title3.weight(.semibold))
                                 .foregroundStyle(.secondary)
@@ -98,24 +98,24 @@ struct MakeSaleView: View {
                                 scannerError = nil
                                 isShowingScanner = true
                             } label: {
-                                Image(systemName: "barcode.viewfinder")
-                                    .font(.title2.weight(.semibold))
-                                    .frame(width: 46, height: 46)
+                                    Image(systemName: "barcode.viewfinder")
+                                        .font(.title2.weight(.semibold))
+                                    .frame(width: 40, height: 40)
                                     .background(Color.white.opacity(0.16))
-                                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                             }
                             .buttonStyle(.plain)
                             .accessibilityLabel("Scan barcode")
                         }
-                        .padding(.horizontal, 18)
-                        .frame(height: 68)
+                        .padding(.horizontal, 16)
+                        .frame(height: 58)
                         .background {
-                            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                            RoundedRectangle(cornerRadius: 20, style: .continuous)
                                 .fill(.ultraThinMaterial)
-                                .glassEffect(in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+                                .glassEffect(in: RoundedRectangle(cornerRadius: 20, style: .continuous))
                         }
                         .overlay {
-                            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                            RoundedRectangle(cornerRadius: 20, style: .continuous)
                                 .strokeBorder(
                                     LinearGradient(
                                         colors: [.white.opacity(0.55), .white.opacity(0.12)],
@@ -126,10 +126,10 @@ struct MakeSaleView: View {
                                 )
                         }
                         .overlay {
-                            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                            RoundedRectangle(cornerRadius: 20, style: .continuous)
                                 .stroke(Color.black.opacity(0.68), lineWidth: 2.2)
                         }
-                        .shadow(color: .black.opacity(0.08), radius: 18, y: 10)
+                        .shadow(color: .black.opacity(0.08), radius: 14, y: 8)
 
                         if let scannerError {
                             Text(scannerError)
@@ -174,9 +174,9 @@ struct MakeSaleView: View {
                                                 .foregroundColor(.accentColor)
                                                 .padding(.top, 2)
                                         }
-                                        .padding(.horizontal)
-                                        .padding(.vertical, 12)
-                                        .frame(maxWidth: .infinity, minHeight: 72, alignment: .topLeading)
+                                        .padding(.horizontal, 14)
+                                        .padding(.vertical, 8)
+                                        .frame(maxWidth: .infinity, minHeight: 58, alignment: .topLeading)
                                         .background(Color(.systemBackground))
                                         .contentShape(Rectangle())
                                     }
@@ -188,14 +188,14 @@ struct MakeSaleView: View {
                                 }
                             }
                         }
-                        .frame(maxHeight: 260)
+                        .frame(maxHeight: 176)
                         .background(Color(.systemBackground))
                         .clipShape(RoundedRectangle(cornerRadius: 12))
                         .overlay(
                             RoundedRectangle(cornerRadius: 12)
                                 .stroke(Color(.systemGray4), lineWidth: 1)
                         )
-                        .offset(y: scannerError == nil ? 78 : 100)
+                        .offset(y: scannerError == nil ? 62 : 84)
                         .shadow(radius: 4)
                     }
                 }
@@ -211,7 +211,7 @@ struct MakeSaleView: View {
                     )
                 }
                 .padding([.horizontal, .top])
-                .frame(height: scannerError == nil ? 128 : 150)
+                .frame(height: scannerError == nil ? 96 : 118)
                 .zIndex(1)
 
                 VStack(spacing: 0) {

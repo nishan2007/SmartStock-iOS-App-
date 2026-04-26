@@ -412,6 +412,7 @@ drop policy if exists "Users can insert receiving batches for allowed stores" on
 
 drop policy if exists "Users can read sales at allowed stores" on public.sales;
 drop policy if exists "Users can insert sales at allowed stores" on public.sales;
+drop policy if exists "Users can update returned sales at allowed stores" on public.sales;
 drop policy if exists "Users can read sale items for allowed sales" on public.sale_items;
 drop policy if exists "Users can insert sale items for allowed sales" on public.sale_items;
 drop policy if exists "Users can read returns at allowed stores" on public.sale_returns;
@@ -476,7 +477,13 @@ using (
   and (
     (reason in ('receive', 'INVENTORY_ENTRY') and public.current_app_user_can_view_receiving_at_location(location_id))
     or (reason in ('sale', 'SALE') and public.current_app_user_can_view_sales_at_location(location_id))
-    or (reason in ('return', 'RETURN') and public.current_app_user_can_view_sales_at_location(location_id))
+    or (
+      reason in ('return', 'RETURN')
+      and (
+        public.current_app_user_can_view_sales_at_location(location_id)
+        or public.current_app_user_can_return_at_location(location_id)
+      )
+    )
     or (reason in ('TRANSFER_OUT', 'INVENTORY_ENTRY', 'TRANSFER_ADJUSTMENT') and public.current_app_user_can_view_inventory())
     or (reason in ('NEW_ITEM', 'MANUAL_ADJUSTMENT') and public.current_app_user_can_view_inventory())
     or (reason not in ('receive', 'sale', 'SALE', 'NEW_ITEM', 'MANUAL_ADJUSTMENT') and public.current_app_user_can_view_inventory())
@@ -584,6 +591,13 @@ with check (
   and public.current_app_user_can_sell_at_location(location_id)
 );
 
+create policy "Users can update returned sales at allowed stores"
+on public.sales
+for update
+to authenticated
+using (public.current_app_user_can_return_at_location(location_id))
+with check (public.current_app_user_can_return_at_location(location_id));
+
 create policy "Users can read sale items for allowed sales"
 on public.sale_items
 for select
@@ -615,7 +629,10 @@ create policy "Users can read returns at allowed stores"
 on public.sale_returns
 for select
 to authenticated
-using (public.current_app_user_can_view_sales_at_location(location_id));
+using (
+  public.current_app_user_can_view_sales_at_location(location_id)
+  or public.current_app_user_can_return_at_location(location_id)
+);
 
 create policy "Users can insert returns at allowed stores"
 on public.sale_returns
@@ -635,7 +652,10 @@ using (
     select 1
     from public.sale_returns sr
     where sr.return_id = sale_return_items.return_id
-      and public.current_app_user_can_view_sales_at_location(sr.location_id)
+      and (
+        public.current_app_user_can_view_sales_at_location(sr.location_id)
+        or public.current_app_user_can_return_at_location(sr.location_id)
+      )
   )
 );
 

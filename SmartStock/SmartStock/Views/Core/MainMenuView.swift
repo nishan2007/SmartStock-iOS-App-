@@ -54,27 +54,19 @@ struct MainMenuView: View {
                     mainMenuHeader
 
                     if let user {
-                        HStack(alignment: .top) {
+                        HStack {
                             VStack(alignment: .leading, spacing: 6) {
                                 Text("\(timeBasedGreeting),")
                                 Text(user.fullName)
                                     .font(.title2.weight(.bold))
-                            }
-                            Spacer()
-
-                            VStack(alignment: .trailing, spacing: 6) {
-                                Image("CompanyLogo")
-                                    .resizable()
-                                    .scaledToFit()
-                                    .frame(width: 118, height: 44)
-                                    .accessibilityLabel("Deckers")
 
                                 Text(sessionManager.selectedStore?.name ?? user.username)
-                                    .font(.subheadline)
                                     .foregroundColor(.secondary)
-                                    .multilineTextAlignment(.trailing)
                             }
-                            .padding(.top, -4)
+                            Spacer()
+                            Image(systemName: "sparkles")
+                                .font(.title2)
+                                .foregroundStyle(.orange)
                         }
                         .padding()
                         .background(
@@ -115,6 +107,16 @@ struct MainMenuView: View {
                     .foregroundColor(.red)
 
                     loginPersistenceCard
+
+                    if !orderedVisibleTiles.isEmpty {
+                        Button {
+                            isShowingCustomizeMenu = true
+                        } label: {
+                            Label("Customize Menu", systemImage: "slider.horizontal.3")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.bordered)
+                    }
                 }
                 .padding()
             }
@@ -182,26 +184,19 @@ struct MainMenuView: View {
             Image("AppLogo")
                 .resizable()
                 .scaledToFit()
-                .frame(width: 164, height: 64, alignment: .leading)
+                .frame(width: 118, height: 46, alignment: .leading)
                 .accessibilityLabel("SmartStock")
 
             Spacer(minLength: 12)
 
-            if !orderedVisibleTiles.isEmpty {
-                Button("Customize") {
-                    isShowingCustomizeMenu = true
-                }
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(.blue)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 8)
-                .background(Color(.secondarySystemBackground).opacity(0.9))
-                .clipShape(Capsule())
-                .buttonStyle(.plain)
-            }
+            Image("CompanyLogo")
+                .resizable()
+                .scaledToFit()
+                .frame(width: 118, height: 44)
+                .accessibilityLabel("Company logo")
         }
-        .frame(maxWidth: .infinity, minHeight: 66, alignment: .center)
-        .padding(.top, -12)
+        .frame(maxWidth: .infinity, minHeight: 48, alignment: .center)
+        .padding(.top, -8)
         .padding(.horizontal, -4)
     }
 

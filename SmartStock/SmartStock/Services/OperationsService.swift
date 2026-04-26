@@ -514,13 +514,13 @@ struct OperationsService {
 
         let items: [ReturnableSaleItem] = try await client
             .from("sale_items")
-            .select("sale_item_id, sale_id, product_id, quantity, unit_price, products(name)")
+            .select("sale_item_id, sale_id, product_id, quantity, unit_price, products(name), sale_return_items(quantity)")
             .eq("sale_id", value: sale.sale_id)
             .eq("product_id", value: productId)
             .execute()
             .value
 
-        guard let item = items.first else {
+        guard let item = items.first(where: { $0.remainingQuantity > 0 }) else {
             throw OperationsServiceError.saleItemNotFound
         }
 
@@ -543,7 +543,7 @@ struct OperationsService {
     func fetchReturnableItems(for saleId: Int) async throws -> [ReturnableSaleItem] {
         try await client
             .from("sale_items")
-            .select("sale_item_id, sale_id, product_id, quantity, unit_price, products(name, image_url)")
+            .select("sale_item_id, sale_id, product_id, quantity, unit_price, products(name, image_url), sale_return_items(quantity)")
             .eq("sale_id", value: saleId)
             .order("sale_item_id", ascending: true)
             .execute()
@@ -562,11 +562,13 @@ struct OperationsService {
         guard quantity > 0 else {
             throw OperationsServiceError.invalidQuantity
         }
-        guard quantity <= item.quantity else {
+        let alreadyReturnedQuantity = try await returnedQuantity(for: item.sale_item_id)
+        let remainingQuantity = max(item.quantity - alreadyReturnedQuantity, 0)
+
+        guard quantity <= remainingQuantity else {
             throw OperationsServiceError.returnQuantityTooHigh
         }
 
-        let session = try await client.auth.session
         let refundAmount = Double(quantity) * (item.unit_price ?? 0)
         let insertedReturn: InsertedSaleReturn = try await client
             .from("sale_returns")
@@ -575,9 +577,8 @@ struct OperationsService {
                     sale_id: sale.sale_id,
                     location_id: store.id,
                     user_id: user.id,
-                    auth_user_id: session.user.id.uuidString,
                     user_name: user.fullName,
-                    refund_method: "ORIGINAL",
+                    refund_method: "CASH",
                     refund_amount: refundAmount,
                     reason: reason,
                     device_id: await MainActor.run { ReceiptNumberManager.shared.currentDeviceId() }
@@ -631,7 +632,7 @@ struct OperationsService {
                         product_id: item.product_id,
                         location_id: store.id,
                         change_qty: quantity,
-                        reason: "return",
+                        reason: "RETURN",
                         note: "Return #\(insertedReturn.return_id) for sale #\(sale.sale_id)",
                         receive_id: nil,
                         receive_device_id: nil,
@@ -643,6 +644,17 @@ struct OperationsService {
         }
 
         return ReturnResult(returnId: insertedReturn.return_id, refundAmount: refundAmount, productName: item.productName)
+    }
+
+    private func returnedQuantity(for saleItemId: Int) async throws -> Int {
+        let rows: [SaleReturnItemQuantityRow] = try await client
+            .from("sale_return_items")
+            .select("quantity")
+            .eq("sale_item_id", value: saleItemId)
+            .execute()
+            .value
+
+        return rows.reduce(0) { $0 + $1.quantity }
     }
 
     func fetchOpenTimeClockEntry(userId: Int) async throws -> TimeClockEntry? {
@@ -1293,6 +1305,10 @@ struct ReturnableProductSummary: Decodable {
     let image_url: String?
 }
 
+struct SaleReturnItemQuantityRow: Decodable {
+    let quantity: Int
+}
+
 struct ReturnableSaleItem: Decodable {
     let sale_item_id: Int
     let sale_id: Int
@@ -1300,6 +1316,7 @@ struct ReturnableSaleItem: Decodable {
     let quantity: Int
     let unit_price: Double?
     let products: ReturnableProductSummary?
+    let sale_return_items: [SaleReturnItemQuantityRow]?
 
     var id: Int { sale_item_id }
 
@@ -1314,13 +1331,20 @@ struct ReturnableSaleItem: Decodable {
         }
         return URL(string: value)
     }
+
+    var returnedQuantity: Int {
+        sale_return_items?.reduce(0) { $0 + $1.quantity } ?? 0
+    }
+
+    var remainingQuantity: Int {
+        max(quantity - returnedQuantity, 0)
+    }
 }
 
 private struct NewSaleReturn: Encodable {
     let sale_id: Int
     let location_id: Int
     let user_id: Int
-    let auth_user_id: String
     let user_name: String
     let refund_method: String
     let refund_amount: Double

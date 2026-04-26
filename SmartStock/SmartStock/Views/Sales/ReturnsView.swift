@@ -44,8 +44,6 @@ struct ReturnsView: View {
     var body: some View {
         ScrollView {
             VStack(spacing: 18) {
-                returnsStoreCard
-
                 if let errorMessage {
                     statusCard(message: errorMessage, color: .red, icon: "exclamationmark.circle.fill")
                 }
@@ -56,21 +54,8 @@ struct ReturnsView: View {
 
                 receiptLookupCard
 
-                if let loadedSale {
-                    receiptSummaryCard(for: loadedSale)
-                }
-
                 if loadedSale != nil {
-                    itemScanCard
-                }
-
-                if !receiptItems.isEmpty {
-                    receiptItemsCard
-                }
-
-                if selectedItem != nil {
-                    returnOptionsCard
-                    submitCard
+                    returnWorkflowPanel
                 }
             }
             .padding()
@@ -95,31 +80,6 @@ struct ReturnsView: View {
                 }
             )
         }
-    }
-
-    private var returnsStoreCard: some View {
-        HStack(spacing: 12) {
-            Image(systemName: "storefront.fill")
-                .font(.title3)
-                .foregroundStyle(.primary)
-                .frame(width: 42, height: 42)
-                .background(Color.white.opacity(0.24))
-                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Return Store")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                Text(sessionManager.selectedStore?.name ?? "No store selected")
-                    .font(.headline)
-            }
-
-            Spacer()
-        }
-        .padding(18)
-        .background(glassCard)
-        .overlay(glassBorder)
-        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
     }
 
     private var receiptLookupCard: some View {
@@ -169,7 +129,35 @@ struct ReturnsView: View {
         .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
     }
 
-    private var itemScanCard: some View {
+    private var returnWorkflowPanel: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            if let loadedSale {
+                receiptSummarySection(for: loadedSale)
+            }
+
+            Divider()
+
+            itemScanSection
+
+            if !receiptItems.isEmpty {
+                Divider()
+                receiptItemsSection
+            }
+
+            if selectedItem != nil {
+                Divider()
+                returnOptionsSection
+                Divider()
+                submitSection
+            }
+        }
+        .padding(18)
+        .background(glassCard)
+        .overlay(glassBorder)
+        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+    }
+
+    private var itemScanSection: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text("Receipt Item Search")
                 .font(.headline)
@@ -192,13 +180,9 @@ struct ReturnsView: View {
                 .accessibilityLabel("Scan item barcode")
             }
         }
-        .padding(18)
-        .background(glassCard)
-        .overlay(glassBorder)
-        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
     }
 
-    private func receiptSummaryCard(for sale: ReturnLookupSale) -> some View {
+    private func receiptSummarySection(for sale: ReturnLookupSale) -> some View {
         HStack(alignment: .top, spacing: 12) {
             VStack(alignment: .leading, spacing: 6) {
                 Text("Matched Receipt")
@@ -220,13 +204,9 @@ struct ReturnsView: View {
                 .background(Color.white.opacity(0.22))
                 .clipShape(Capsule())
         }
-        .padding(18)
-        .background(glassCard)
-        .overlay(glassBorder)
-        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
     }
 
-    private var receiptItemsCard: some View {
+    private var receiptItemsSection: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text("Receipt History")
                 .font(.headline)
@@ -237,10 +217,6 @@ struct ReturnsView: View {
                 }
             }
         }
-        .padding(18)
-        .background(glassCard)
-        .overlay(glassBorder)
-        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
     }
 
     private func receiptItemRow(_ item: ReturnableSaleItem) -> some View {
@@ -263,12 +239,13 @@ struct ReturnsView: View {
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
 
-                    HStack(spacing: 10) {
-                        Text("Sold qty \(item.quantity)")
-                        Text(item.unitPriceText)
-                    }
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    Text(item.quantitySummaryText)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    Text(item.unitPriceText)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
 
                 Spacer(minLength: 8)
@@ -291,7 +268,7 @@ struct ReturnsView: View {
         .buttonStyle(.plain)
     }
 
-    private var returnOptionsCard: some View {
+    private var returnOptionsSection: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text("Return Options")
                 .font(.headline)
@@ -331,13 +308,9 @@ struct ReturnsView: View {
             }
             .toggleStyle(.switch)
         }
-        .padding(18)
-        .background(glassCard)
-        .overlay(glassBorder)
-        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
     }
 
-    private var submitCard: some View {
+    private var submitSection: some View {
         VStack(alignment: .leading, spacing: 12) {
             Button(action: submitReturn) {
                 if isSubmitting {
@@ -353,10 +326,6 @@ struct ReturnsView: View {
             .buttonStyle(.borderedProminent)
             .disabled(isSubmitting || selectedItem == nil || loadedSale == nil)
         }
-        .padding(18)
-        .background(glassCard)
-        .overlay(glassBorder)
-        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
     }
 
     private func statusCard(message: String, color: Color, icon: String) -> some View {
@@ -453,7 +422,7 @@ struct ReturnsView: View {
 
     private var screenBackground: some View {
         LinearGradient(
-            colors: [Color.cyan.opacity(0.08), Color.white, Color.orange.opacity(0.05)],
+            colors: [Color.orange.opacity(0.10), Color.mint.opacity(0.08), Color(.systemBackground)],
             startPoint: .topLeading,
             endPoint: .bottomTrailing
         )
@@ -572,6 +541,11 @@ struct ReturnsView: View {
             return
         }
 
+        guard quantityValue <= selectedItem.remainingQuantity else {
+            errorMessage = "Return quantity cannot exceed the remaining returnable quantity of \(selectedItem.remainingQuantity)."
+            return
+        }
+
         isSubmitting = true
         errorMessage = nil
         successMessage = nil
@@ -602,5 +576,13 @@ struct ReturnsView: View {
 private extension ReturnableSaleItem {
     var unitPriceText: String {
         String(format: "$%.2f", unit_price ?? 0)
+    }
+
+    var quantitySummaryText: String {
+        if returnedQuantity > 0 {
+            return "Sold \(quantity) • Returned \(returnedQuantity) • Available \(remainingQuantity)"
+        }
+
+        return "Sold qty \(quantity)"
     }
 }
