@@ -54,19 +54,27 @@ struct MainMenuView: View {
                     mainMenuHeader
 
                     if let user {
-                        HStack {
+                        HStack(alignment: .top) {
                             VStack(alignment: .leading, spacing: 6) {
                                 Text("\(timeBasedGreeting),")
                                 Text(user.fullName)
                                     .font(.title2.weight(.bold))
-
-                                Text(sessionManager.selectedStore?.name ?? user.username)
-                                    .foregroundColor(.secondary)
                             }
                             Spacer()
-                            Image(systemName: "sparkles")
-                                .font(.title2)
-                                .foregroundStyle(.orange)
+
+                            VStack(alignment: .trailing, spacing: 6) {
+                                Image("CompanyLogo")
+                                    .resizable()
+                                    .scaledToFit()
+                                    .frame(width: 118, height: 44)
+                                    .accessibilityLabel("Deckers")
+
+                                Text(sessionManager.selectedStore?.name ?? user.username)
+                                    .font(.subheadline)
+                                    .foregroundColor(.secondary)
+                                    .multilineTextAlignment(.trailing)
+                            }
+                            .padding(.top, -4)
                         }
                         .padding()
                         .background(

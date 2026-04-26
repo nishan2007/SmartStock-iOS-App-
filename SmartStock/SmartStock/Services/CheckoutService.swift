@@ -2,7 +2,7 @@
 //  CheckoutService.swift
 //  SmartStock
 //
-//  Created by Nishan Narain on 4/15/26.
+//  Created by Nishan Narain on 4/26/26.
 //
 
 import Foundation
@@ -58,6 +58,8 @@ struct NewInventoryMovement: Encodable {
     let note: String?
 }
 
+// MARK: - Private DTOs (used only in this service)
+
 private struct CustomerBalanceRow: Decodable {
     let customer_id: Int
     let current_balance: Double?
@@ -69,19 +71,33 @@ private struct CustomerBalanceUpdate: Encodable {
     let current_balance: Double
 }
 
-enum CheckoutPaymentMethod: String {
+// MARK: - Enums
+
+enum CheckoutPaymentMethod: String, CaseIterable, Identifiable, Hashable {
     case cash = "CASH"
     case card = "CARD"
     case cheque = "CHEQUE"
     case account = "ACCOUNT"
+
+    var id: String { rawValue }
 }
 
-enum CheckoutError: LocalizedError {
+enum CheckoutError: LocalizedError, Identifiable {
     case missingCustomerAccount
     case missingPaymentReference(String)
     case inactiveCustomerAccount
     case creditLimitExceeded
-
+    
+    // MARK: - Identifiable
+    var id: String {
+        switch self {
+        case .missingCustomerAccount: return "missingCustomerAccount"
+        case .missingPaymentReference: return "missingPaymentReference"
+        case .inactiveCustomerAccount: return "inactiveCustomerAccount"
+        case .creditLimitExceeded: return "creditLimitExceeded"
+        }
+    }
+    
     var errorDescription: String? {
         switch self {
         case .missingCustomerAccount:
@@ -99,13 +115,7 @@ enum CheckoutError: LocalizedError {
 // MARK: - Service
 
 enum CheckoutService {
-
-    /// Performs a full checkout:
-    /// 1) inserts sale header
-    /// 2) fetches sale_id
-    /// 3) inserts sale_items
-    /// 4) updates inventory for the selected store
-    /// 5) logs inventory movements
+    
     static func checkout(
         cart: [CartItem],
         user: AppUser,
@@ -114,29 +124,29 @@ enum CheckoutService {
         customerAccountId: Int? = nil,
         paymentReference: String? = nil
     ) async throws {
-
+        
         guard !cart.isEmpty else { return }
-
-        let itemDiscountAmount = cart.reduce(0) { $0 + $1.discountAmount }
+        
         let subtotalAmount = cart.reduce(0) { $0 + $1.subtotal }
-        let totalDiscountAmount = itemDiscountAmount
+        let totalDiscountAmount = cart.reduce(0) { $0 + $1.discountAmount }
         let total = max(subtotalAmount - totalDiscountAmount, 0)
+        
         let receipt = await MainActor.run {
             ReceiptNumberManager.shared.nextReceipt(for: store.id)
         }
-
+        
+        let trimmedReference = paymentReference?.trimmingCharacters(in: .whitespacesAndNewlines)
         let resolvedCustomerAccountId: Int?
         let paymentStatus: String
         let amountPaid: Double
-        let trimmedPaymentReference = paymentReference?.trimmingCharacters(in: .whitespacesAndNewlines)
         let resolvedPaymentReference: String?
-
+        
         switch paymentMethod {
         case .account:
             guard let customerAccountId else {
                 throw CheckoutError.missingCustomerAccount
             }
-
+            
             let customer: CustomerBalanceRow = try await supabase
                 .from("customer_accounts")
                 .select("customer_id, current_balance, credit_limit, is_active")
@@ -144,43 +154,44 @@ enum CheckoutService {
                 .single()
                 .execute()
                 .value
-
+            
             guard customer.is_active ?? true else {
                 throw CheckoutError.inactiveCustomerAccount
             }
-
+            
             let currentBalance = customer.current_balance ?? 0
             let nextBalance = currentBalance + total
+            
             if let creditLimit = customer.credit_limit, nextBalance > creditLimit {
                 throw CheckoutError.creditLimitExceeded
             }
-
+            
             try await supabase
                 .from("customer_accounts")
                 .update(CustomerBalanceUpdate(current_balance: nextBalance))
                 .eq("customer_id", value: customer.customer_id)
                 .execute()
-
+            
             resolvedCustomerAccountId = customer.customer_id
             paymentStatus = "UNPAID"
             amountPaid = 0
             resolvedPaymentReference = nil
+            
         case .cash, .card, .cheque:
-            if paymentMethod == .card, trimmedPaymentReference?.isEmpty != false {
+            if paymentMethod == .card && (trimmedReference?.isEmpty != false) {
                 throw CheckoutError.missingPaymentReference("card transaction ID")
             }
-
-            if paymentMethod == .cheque, trimmedPaymentReference?.isEmpty != false {
+            if paymentMethod == .cheque && (trimmedReference?.isEmpty != false) {
                 throw CheckoutError.missingPaymentReference("cheque number")
             }
-
+            
             resolvedCustomerAccountId = customerAccountId
             paymentStatus = "PAID"
             amountPaid = total
-            resolvedPaymentReference = paymentMethod == .cash ? nil : trimmedPaymentReference
+            resolvedPaymentReference = (paymentMethod == .cash) ? nil : trimmedReference
         }
-
-        // 1) Create sale
+        
+        // Create Sale
         let newSale = NewSale(
             location_id: store.id,
             user_id: user.id,
@@ -200,7 +211,7 @@ enum CheckoutService {
             receipt_device_id: receipt.deviceId,
             receipt_sequence: receipt.sequence
         )
-
+        
         let insertedSale: InsertedSaleRow = try await supabase
             .from("sales")
             .insert(newSale)
@@ -208,35 +219,35 @@ enum CheckoutService {
             .single()
             .execute()
             .value
-
-        if let resolvedCustomerAccountId {
+        
+        // Customer Account Transaction (if applicable)
+        if let customerId = resolvedCustomerAccountId {
             let transactionType = paymentMethod == .account ? "SALE_CREDIT" : "SALE_PAID"
-            let note: String
-            if paymentMethod == .account {
-                note = "sale_id=\(insertedSale.sale_id); billed_to_account"
-            } else if let resolvedPaymentReference {
-                note = "sale_id=\(insertedSale.sale_id); payment_method=\(paymentMethod.rawValue); payment_reference=\(resolvedPaymentReference)"
-            } else {
-                note = "sale_id=\(insertedSale.sale_id); payment_method=\(paymentMethod.rawValue)"
-            }
-
+            let note: String = {
+                if paymentMethod == .account {
+                    return "sale_id=\(insertedSale.sale_id); billed_to_account"
+                } else if let ref = resolvedPaymentReference {
+                    return "sale_id=\(insertedSale.sale_id); payment_method=\(paymentMethod.rawValue); payment_reference=\(ref)"
+                } else {
+                    return "sale_id=\(insertedSale.sale_id); payment_method=\(paymentMethod.rawValue)"
+                }
+            }()
+            
             try await supabase
                 .from("customer_account_transactions")
-                .insert(
-                    NewCustomerAccountTransaction(
-                        customer_id: resolvedCustomerAccountId,
-                        location_id: store.id,
-                        sale_id: insertedSale.sale_id,
-                        amount: total,
-                        transaction_type: transactionType,
-                        note: note,
-                        user_name: user.fullName
-                    )
-                )
+                .insert(NewCustomerAccountTransaction(
+                    customer_id: customerId,
+                    location_id: store.id,
+                    sale_id: insertedSale.sale_id,
+                    amount: total,
+                    transaction_type: transactionType,
+                    note: note,
+                    user_name: user.fullName
+                ))
                 .execute()
         }
-
-        // 2) Build sale items
+        
+        // Insert Sale Items
         let saleItems = cart.map { item in
             NewSaleItem(
                 sale_id: insertedSale.sale_id,
@@ -245,16 +256,12 @@ enum CheckoutService {
                 unit_price: item.unitPrice
             )
         }
-
-        // 3) Insert sale items
-        try await supabase
-            .from("sale_items")
-            .insert(saleItems)
-            .execute()
-
-        // 4) Update inventory for each item in the selected store
+        
+        try await supabase.from("sale_items").insert(saleItems).execute()
+        
+        // Update Inventory for each item
         for item in cart {
-            let inventoryRow: InventoryRow = try await supabase
+            let inventory: InventoryRow = try await supabase
                 .from("inventory")
                 .select("inventory_id, quantity_on_hand")
                 .eq("product_id", value: item.product.id)
@@ -262,26 +269,24 @@ enum CheckoutService {
                 .single()
                 .execute()
                 .value
-
-            let newQuantity = inventoryRow.quantity_on_hand - item.quantity
-
+            
+            let newQty = inventory.quantity_on_hand - item.quantity
+            
             try await supabase
                 .from("inventory")
-                .update(InventoryQuantityUpdate(quantity_on_hand: newQuantity))
-                .eq("inventory_id", value: inventoryRow.inventory_id)
+                .update(InventoryQuantityUpdate(quantity_on_hand: newQty))
+                .eq("inventory_id", value: inventory.inventory_id)
                 .execute()
-
-            let movement = NewInventoryMovement(
-                product_id: item.product.id,
-                location_id: store.id,
-                change_qty: -item.quantity,
-                reason: "SALE",
-                note: "sale_id=\(insertedSale.sale_id)"
-            )
-
+            
             try await supabase
                 .from("inventory_movements")
-                .insert(movement)
+                .insert(NewInventoryMovement(
+                    product_id: item.product.id,
+                    location_id: store.id,
+                    change_qty: -item.quantity,
+                    reason: "SALE",
+                    note: "sale_id=\(insertedSale.sale_id)"
+                ))
                 .execute()
         }
     }

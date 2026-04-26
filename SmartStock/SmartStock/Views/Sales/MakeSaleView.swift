@@ -69,9 +69,12 @@ struct MakeSaleView: View {
                 // 🔍 Search Bar + Overlay Results
                 ZStack(alignment: .top) {
                     VStack(spacing: 0) {
-                        HStack(spacing: 10) {
-                            TextField("Search product...", text: $searchText)
-                                .textFieldStyle(.roundedBorder)
+                        HStack(spacing: 14) {
+                            Image(systemName: "magnifyingglass")
+                                .font(.title3.weight(.semibold))
+                                .foregroundStyle(.secondary)
+
+                            TextField("Product Lookup", text: $searchText)
                                 .focused($isSearchFieldFocused)
                                 .textInputAutocapitalization(.never)
                                 .autocorrectionDisabled(true)
@@ -85,6 +88,10 @@ struct MakeSaleView: View {
                                     scheduleSearch()
                                 }
 
+                            Rectangle()
+                                .fill(.white.opacity(0.28))
+                                .frame(width: 1, height: 30)
+
                             Button {
                                 checkoutError = nil
                                 checkoutMessage = nil
@@ -92,11 +99,37 @@ struct MakeSaleView: View {
                                 isShowingScanner = true
                             } label: {
                                 Image(systemName: "barcode.viewfinder")
-                                    .font(.title2)
-                                    .frame(width: 44, height: 44)
+                                    .font(.title2.weight(.semibold))
+                                    .frame(width: 46, height: 46)
+                                    .background(Color.white.opacity(0.16))
+                                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
                             }
-                            .buttonStyle(.bordered)
+                            .buttonStyle(.plain)
+                            .accessibilityLabel("Scan barcode")
                         }
+                        .padding(.horizontal, 18)
+                        .frame(height: 68)
+                        .background {
+                            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                                .fill(.ultraThinMaterial)
+                                .glassEffect(in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+                        }
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                                .strokeBorder(
+                                    LinearGradient(
+                                        colors: [.white.opacity(0.55), .white.opacity(0.12)],
+                                        startPoint: .topLeading,
+                                        endPoint: .bottomTrailing
+                                    ),
+                                    lineWidth: 1
+                                )
+                        }
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                                .stroke(Color.black.opacity(0.68), lineWidth: 2.2)
+                        }
+                        .shadow(color: .black.opacity(0.08), radius: 18, y: 10)
 
                         if let scannerError {
                             Text(scannerError)
@@ -162,7 +195,7 @@ struct MakeSaleView: View {
                             RoundedRectangle(cornerRadius: 12)
                                 .stroke(Color(.systemGray4), lineWidth: 1)
                         )
-                        .offset(y: scannerError == nil ? 50 : 72)
+                        .offset(y: scannerError == nil ? 78 : 100)
                         .shadow(radius: 4)
                     }
                 }
@@ -178,7 +211,7 @@ struct MakeSaleView: View {
                     )
                 }
                 .padding([.horizontal, .top])
-                .frame(height: scannerError == nil ? 100 : 124)
+                .frame(height: scannerError == nil ? 128 : 150)
                 .zIndex(1)
 
                 VStack(spacing: 0) {
@@ -204,19 +237,24 @@ struct MakeSaleView: View {
                         List {
                             ForEach(cart) { item in
                                 HStack(spacing: 16) {
+                                    cartItemImage(for: item.product)
+                                        .frame(width: 54, height: 54)
+                                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+
                                     VStack(alignment: .leading, spacing: 4) {
                                         Text(item.product.name)
                                             .font(.headline)
+                                            .lineLimit(2)
+
+                                        Text("ID: \(item.product.id)")
+                                            .font(.subheadline)
+                                            .foregroundColor(.secondary)
 
                                         if item.discountAmount > 0 {
                                             Text("Item discount: -$\(item.discountAmount, specifier: "%.2f")")
                                                 .font(.caption)
                                                 .foregroundColor(.orange)
                                         }
-
-                                        Text("$\(item.unitPrice, specifier: "%.2f") each")
-                                            .font(.subheadline)
-                                            .foregroundColor(.secondary)
                                     }
 
                                     Spacer()
@@ -532,7 +570,7 @@ struct MakeSaleView: View {
             // 1️⃣ Try direct match in products table
             let directResults: [Product] = try await supabase
                 .from("products")
-                .select("product_id, name, sku, price")
+                .select("product_id, name, sku, price, image_url")
                 .or("barcode.eq.\(barcode),sku.eq.\(barcode)")
                 .limit(1)
                 .execute()
@@ -569,7 +607,7 @@ struct MakeSaleView: View {
             // 3️⃣ Fetch actual product using product_id
             let products: [Product] = try await supabase
                 .from("products")
-                .select("product_id, name, sku, price")
+                .select("product_id, name, sku, price, image_url")
                 .eq("product_id", value: match.product_id)
                 .limit(1)
                 .execute()
@@ -603,7 +641,7 @@ struct MakeSaleView: View {
         do {
             let results: [Product] = try await supabase
                 .from("products")
-                .select("product_id, name, sku, price")
+                .select("product_id, name, sku, price, image_url")
                 .or("name.ilike.%\(trimmedSearch)%,sku.ilike.%\(trimmedSearch)%,barcode.ilike.%\(trimmedSearch)%")
                 .limit(4)
                 .execute()
@@ -639,7 +677,7 @@ struct MakeSaleView: View {
 
             let matchedProducts: [Product] = try await supabase
                 .from("products")
-                .select("product_id, name, sku, price")
+                .select("product_id, name, sku, price, image_url")
                 .eq("product_id", value: match.product_id)
                 .limit(1)
                 .execute()
@@ -782,7 +820,7 @@ struct MakeSaleView: View {
                             Text(method.title).tag(method)
                         }
                     }
-                    .pickerStyle(.inline)
+                    .pickerStyle(.menu)
                 }
 
                 if paymentMethod == .cash {
@@ -863,6 +901,32 @@ struct MakeSaleView: View {
             if cashCollectedText.isEmpty {
                 cashCollectedText = String(format: "%.2f", total)
             }
+        }
+    }
+
+    @ViewBuilder
+    private func cartItemImage(for product: Product) -> some View {
+        if let imageURL = product.imageURL {
+            AsyncImage(url: imageURL) { phase in
+                switch phase {
+                case .success(let image):
+                    image
+                        .resizable()
+                        .scaledToFill()
+                default:
+                    cartItemImagePlaceholder
+                }
+            }
+        } else {
+            cartItemImagePlaceholder
+        }
+    }
+
+    private var cartItemImagePlaceholder: some View {
+        ZStack {
+            Color(.secondarySystemBackground)
+            Image(systemName: "shippingbox.fill")
+                .foregroundColor(.secondary)
         }
     }
 

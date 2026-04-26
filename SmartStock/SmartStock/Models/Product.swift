@@ -12,11 +12,13 @@ struct Product: Decodable, Identifiable {
     let name: String
     let sku: String?
     let price: Double?
+    let imageURL: URL?
 
     enum CodingKeys: String, CodingKey {
         case id = "product_id"
         case name
         case sku
         case price
+        case imageURL = "image_url"
     }
 }

@@ -527,6 +527,29 @@ struct OperationsService {
         return ReturnSaleLookupResult(sale: sale, item: item)
     }
 
+    func fetchReturnSale(query: String, storeId: Int) async throws -> ReturnLookupSale {
+        let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedQuery.isEmpty else {
+            throw OperationsServiceError.missingLookupValue
+        }
+
+        guard let sale = try await fetchSaleForReturn(query: trimmedQuery, storeId: storeId) else {
+            throw OperationsServiceError.saleNotFound
+        }
+
+        return sale
+    }
+
+    func fetchReturnableItems(for saleId: Int) async throws -> [ReturnableSaleItem] {
+        try await client
+            .from("sale_items")
+            .select("sale_item_id, sale_id, product_id, quantity, unit_price, products(name, image_url)")
+            .eq("sale_id", value: saleId)
+            .order("sale_item_id", ascending: true)
+            .execute()
+            .value
+    }
+
     func createReturn(
         sale: ReturnLookupSale,
         item: ReturnableSaleItem,
@@ -543,6 +566,7 @@ struct OperationsService {
             throw OperationsServiceError.returnQuantityTooHigh
         }
 
+        let session = try await client.auth.session
         let refundAmount = Double(quantity) * (item.unit_price ?? 0)
         let insertedReturn: InsertedSaleReturn = try await client
             .from("sale_returns")
@@ -551,6 +575,7 @@ struct OperationsService {
                     sale_id: sale.sale_id,
                     location_id: store.id,
                     user_id: user.id,
+                    auth_user_id: session.user.id.uuidString,
                     user_name: user.fullName,
                     refund_method: "ORIGINAL",
                     refund_amount: refundAmount,
@@ -1263,8 +1288,9 @@ struct ReturnLookupSale: Decodable {
     let returned_amount: Double?
 }
 
-struct ReturnableProductName: Decodable {
+struct ReturnableProductSummary: Decodable {
     let name: String?
+    let image_url: String?
 }
 
 struct ReturnableSaleItem: Decodable {
@@ -1273,10 +1299,20 @@ struct ReturnableSaleItem: Decodable {
     let product_id: Int
     let quantity: Int
     let unit_price: Double?
-    let products: ReturnableProductName?
+    let products: ReturnableProductSummary?
+
+    var id: Int { sale_item_id }
 
     var productName: String {
         products?.name ?? "Unknown Product"
+    }
+
+    var imageURL: URL? {
+        guard let value = products?.image_url?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !value.isEmpty else {
+            return nil
+        }
+        return URL(string: value)
     }
 }
 
@@ -1284,6 +1320,7 @@ private struct NewSaleReturn: Encodable {
     let sale_id: Int
     let location_id: Int
     let user_id: Int
+    let auth_user_id: String
     let user_name: String
     let refund_method: String
     let refund_amount: Double
