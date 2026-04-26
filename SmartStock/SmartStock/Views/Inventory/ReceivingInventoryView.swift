@@ -8,6 +8,7 @@ import SwiftUI
 struct ReceivingInventoryView: View {
     @EnvironmentObject private var sessionManager: SessionManager
     private let service = OperationsService()
+    let isEmbedded: Bool
 
     @State private var barcode = ""
     @State private var shipmentItems: [ReceivingCartItem] = []
@@ -17,6 +18,10 @@ struct ReceivingInventoryView: View {
     @State private var editedQuantityText = ""
     @State private var errorMessage: String?
     @State private var successMessage: String?
+
+    init(isEmbedded: Bool = false) {
+        self.isEmbedded = isEmbedded
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -177,7 +182,7 @@ struct ReceivingInventoryView: View {
             }
             .padding()
         }
-        .navigationTitle("Receiving")
+        .navigationTitle(isEmbedded ? "" : "Receiving")
         .sheet(isPresented: $isShowingScanner) {
             BarcodeScannerSheet(
                 scannedCode: $barcode,

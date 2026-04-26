@@ -97,6 +97,22 @@ as $$
     or public.current_app_user_has_mobile_permission('view_receiving_history')
 $$;
 
+create or replace function public.current_app_user_can_view_inventory_at_location(target_location_id int)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select
+    public.current_app_user_can_view_inventory()
+    and (
+      public.current_app_user_has_location(target_location_id)
+      or coalesce(public.current_app_user_is_admin(), false)
+      or public.current_app_user_has_mobile_permission('view_all_stores_inventory')
+    )
+$$;
+
 create or replace function public.current_app_user_can_manage_product_catalog()
 returns boolean
 language sql
@@ -313,6 +329,7 @@ revoke all on function public.current_app_user_has_mobile_permission(text) from 
 revoke all on function public.current_app_user_location_ids() from public;
 revoke all on function public.current_app_user_has_location(int) from public;
 revoke all on function public.current_app_user_can_view_inventory() from public;
+revoke all on function public.current_app_user_can_view_inventory_at_location(int) from public;
 revoke all on function public.current_app_user_can_manage_product_catalog() from public;
 revoke all on function public.current_app_user_can_create_products() from public;
 revoke all on function public.current_app_user_can_edit_products() from public;
@@ -334,6 +351,7 @@ grant execute on function public.current_app_user_has_mobile_permission(text) to
 grant execute on function public.current_app_user_location_ids() to authenticated;
 grant execute on function public.current_app_user_has_location(int) to authenticated;
 grant execute on function public.current_app_user_can_view_inventory() to authenticated;
+grant execute on function public.current_app_user_can_view_inventory_at_location(int) to authenticated;
 grant execute on function public.current_app_user_can_manage_product_catalog() to authenticated;
 grant execute on function public.current_app_user_can_create_products() to authenticated;
 grant execute on function public.current_app_user_can_edit_products() to authenticated;
@@ -434,10 +452,7 @@ create policy "Users can read inventory at allowed stores"
 on public.inventory
 for select
 to authenticated
-using (
-  public.current_app_user_can_view_inventory()
-  and public.current_app_user_has_location(location_id)
-);
+using (public.current_app_user_can_view_inventory_at_location(location_id));
 
 create policy "Users can create inventory at allowed stores"
 on public.inventory

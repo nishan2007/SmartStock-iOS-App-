@@ -93,6 +93,8 @@ final class InventoryViewModel: ObservableObject {
             items = try await service.fetchInventory(for: locationId)
             if let locationId {
                 selectedLocationId = locationId
+            } else {
+                selectedLocationId = nil
             }
         } catch {
             errorMessage = error.localizedDescription

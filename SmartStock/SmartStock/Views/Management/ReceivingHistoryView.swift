@@ -8,9 +8,14 @@ import Supabase
 
 struct ReceivingHistoryView: View {
     @EnvironmentObject private var sessionManager: SessionManager
+    let isEmbedded: Bool
     @State private var rows: [ReceivingHistoryRow] = []
     @State private var isLoading = false
     @State private var errorMessage: String?
+
+    init(isEmbedded: Bool = false) {
+        self.isEmbedded = isEmbedded
+    }
 
     var body: some View {
         List {
@@ -64,7 +69,7 @@ struct ReceivingHistoryView: View {
                 }
             }
         }
-        .navigationTitle("Receiving History")
+        .navigationTitle(isEmbedded ? "" : "Receiving History")
         .task {
             guard canViewReceivingHistory else { return }
             await loadHistory()
@@ -77,7 +82,6 @@ struct ReceivingHistoryView: View {
 
     private var canViewReceivingHistory: Bool {
         sessionManager.currentUser?.canAccess(.viewReceivingHistory) == true
-            || sessionManager.currentUser?.canAccess(.receiving) == true
     }
 
     private func loadHistory() async {

@@ -237,7 +237,7 @@ struct ViewSalesView: View {
         do {
             sales = try await supabase
                 .from("sales")
-                .select("sale_id, total_amount, status, payment_method, transaction_source, created_at, payment_status, returned_amount, receipt_number, receipt_device_id, receipt_sequence, users(full_name), locations(name), customer_accounts(name), sale_items(quantity)")
+                .select("sale_id, total_amount, status, payment_method, payment_reference, transaction_source, created_at, payment_status, returned_amount, receipt_number, receipt_device_id, receipt_sequence, users(full_name), locations(name), customer_accounts(name), sale_items(quantity)")
                 .eq("location_id", value: store.id)
                 .order("sale_id", ascending: false)
                 .execute()

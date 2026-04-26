@@ -154,6 +154,45 @@ struct InventoryService {
 
         return rows.first?.toInventoryItem()
     }
+
+    func fetchInventoryItems(productId: Int) async throws -> [InventoryItem] {
+        let rows: [InventoryRowDTO] = try await supabase
+            .from("inventory")
+            .select(
+                """
+                inventory_id,
+                product_id,
+                location_id,
+                quantity_on_hand,
+                reorder_level,
+                updated_at,
+                product:products!inner(
+                    product_id,
+                    name,
+                    sku,
+                    barcode,
+                    cost_price,
+                    price,
+                    description,
+                    created_by_name,
+                    product_type,
+                    image_url,
+                    product_barcodes(barcode),
+                    category:categories(name),
+                    vendor:vendors(name)
+                ),
+                location:locations!inner(
+                    name
+                )
+                """
+            )
+            .eq("product_id", value: productId)
+            .order("location_id", ascending: true)
+            .execute()
+            .value
+
+        return rows.map { $0.toInventoryItem() }
+    }
 }
 
 private struct ProductBarcodeLookupDTO: Decodable {

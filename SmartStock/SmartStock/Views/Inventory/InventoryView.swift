@@ -35,7 +35,9 @@ struct InventoryView: View {
                     ScrollView {
                         VStack(alignment: .leading, spacing: 16) {
                             summaryCards
-                            locationFilterBar
+                            if canViewAllStoresInventory {
+                                locationFilterBar
+                            }
                             statusFilterBar
 
                             LazyVStack(spacing: 12) {
@@ -45,7 +47,7 @@ struct InventoryView: View {
                                             NavigationLink {
                                                 InventoryDetailView(item: item) {
                                                     Task {
-                                                        await viewModel.refresh(locationId: sessionManager.selectedStore?.id)
+                                                        await loadInventoryForCurrentPermissions()
                                                     }
                                                 }
                                                 .environmentObject(sessionManager)
@@ -63,7 +65,7 @@ struct InventoryView: View {
                         .padding()
                     }
                     .refreshable {
-                        await viewModel.refresh(locationId: sessionManager.selectedStore?.id)
+                        await loadInventoryForCurrentPermissions()
                     }
                 }
             }
@@ -110,14 +112,19 @@ struct InventoryView: View {
             .sheet(isPresented: $isShowingNewItem) {
                 InventoryItemFormView(mode: .add, defaultStore: sessionManager.selectedStore) {
                     Task {
-                        await viewModel.refresh(locationId: sessionManager.selectedStore?.id)
+                        await loadInventoryForCurrentPermissions()
                     }
                 }
                 .environmentObject(sessionManager)
             }
             .task {
                 if viewModel.items.isEmpty {
-                    await viewModel.loadInventory(locationId: sessionManager.selectedStore?.id)
+                    await loadInventoryForCurrentPermissions()
+                }
+            }
+            .onChange(of: sessionManager.selectedStore?.id) { _, _ in
+                Task {
+                    await loadInventoryForCurrentPermissions()
                 }
             }
         }
@@ -130,6 +137,18 @@ struct InventoryView: View {
 
     private var canAddNewItem: Bool {
         sessionManager.currentUser?.canAccess(.addNewItem) == true
+    }
+
+    private var canViewAllStoresInventory: Bool {
+        sessionManager.currentUser?.canAccess(.viewAllStoresInventory) == true
+    }
+
+    private func loadInventoryForCurrentPermissions() async {
+        if canViewAllStoresInventory {
+            await viewModel.loadInventory()
+        } else {
+            await viewModel.loadInventory(locationId: sessionManager.selectedStore?.id)
+        }
     }
 
     private var summaryCards: some View {

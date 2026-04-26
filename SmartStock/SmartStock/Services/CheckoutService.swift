@@ -23,6 +23,7 @@ struct NewSale: Encodable {
     let customer_id: Int?
     let payment_status: String
     let amount_paid: Double
+    let payment_reference: String?
     let transaction_source: String
     let receipt_number: String
     let receipt_device_id: String
@@ -77,6 +78,7 @@ enum CheckoutPaymentMethod: String {
 
 enum CheckoutError: LocalizedError {
     case missingCustomerAccount
+    case missingPaymentReference(String)
     case inactiveCustomerAccount
     case creditLimitExceeded
 
@@ -84,6 +86,8 @@ enum CheckoutError: LocalizedError {
         switch self {
         case .missingCustomerAccount:
             return "Select a customer account for account billing."
+        case .missingPaymentReference(let label):
+            return "Enter the \(label)."
         case .inactiveCustomerAccount:
             return "This customer account is inactive."
         case .creditLimitExceeded:
@@ -107,7 +111,8 @@ enum CheckoutService {
         user: AppUser,
         store: Store,
         paymentMethod: CheckoutPaymentMethod,
-        customerAccountId: Int? = nil
+        customerAccountId: Int? = nil,
+        paymentReference: String? = nil
     ) async throws {
 
         guard !cart.isEmpty else { return }
@@ -123,6 +128,8 @@ enum CheckoutService {
         let resolvedCustomerAccountId: Int?
         let paymentStatus: String
         let amountPaid: Double
+        let trimmedPaymentReference = paymentReference?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let resolvedPaymentReference: String?
 
         switch paymentMethod {
         case .account:
@@ -157,10 +164,20 @@ enum CheckoutService {
             resolvedCustomerAccountId = customer.customer_id
             paymentStatus = "UNPAID"
             amountPaid = 0
+            resolvedPaymentReference = nil
         case .cash, .card, .cheque:
+            if paymentMethod == .card, trimmedPaymentReference?.isEmpty != false {
+                throw CheckoutError.missingPaymentReference("card transaction ID")
+            }
+
+            if paymentMethod == .cheque, trimmedPaymentReference?.isEmpty != false {
+                throw CheckoutError.missingPaymentReference("cheque number")
+            }
+
             resolvedCustomerAccountId = customerAccountId
             paymentStatus = "PAID"
             amountPaid = total
+            resolvedPaymentReference = paymentMethod == .cash ? nil : trimmedPaymentReference
         }
 
         // 1) Create sale
@@ -177,6 +194,7 @@ enum CheckoutService {
             customer_id: resolvedCustomerAccountId,
             payment_status: paymentStatus,
             amount_paid: amountPaid,
+            payment_reference: resolvedPaymentReference,
             transaction_source: "mobile_app",
             receipt_number: receipt.receiptNumber,
             receipt_device_id: receipt.deviceId,
@@ -196,6 +214,8 @@ enum CheckoutService {
             let note: String
             if paymentMethod == .account {
                 note = "sale_id=\(insertedSale.sale_id); billed_to_account"
+            } else if let resolvedPaymentReference {
+                note = "sale_id=\(insertedSale.sale_id); payment_method=\(paymentMethod.rawValue); payment_reference=\(resolvedPaymentReference)"
             } else {
                 note = "sale_id=\(insertedSale.sale_id); payment_method=\(paymentMethod.rawValue)"
             }

@@ -29,6 +29,7 @@ struct Sale: Decodable, Identifiable {
     let total_amount: Double?
     let status: String?
     let payment_method: String?
+    let payment_reference: String?
     let transaction_source: String?
     let created_at: String?
     let payment_status: String?
@@ -71,6 +72,22 @@ struct Sale: Decodable, Identifiable {
     var paymentMethodText: String {
         let trimmed = payment_method?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         return trimmed.isEmpty ? "Unknown Payment" : trimmed.replacingOccurrences(of: "_", with: " ").capitalized
+    }
+
+    var paymentReferenceText: String? {
+        let trimmed = payment_reference?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    var paymentReferenceLabel: String {
+        switch payment_method?.uppercased() {
+        case "CARD":
+            return "Transaction ID"
+        case "CHEQUE":
+            return "Cheque #"
+        default:
+            return "Payment Reference"
+        }
     }
 
     var receiptNumberText: String {

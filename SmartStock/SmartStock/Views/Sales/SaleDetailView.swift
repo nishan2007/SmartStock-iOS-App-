@@ -26,6 +26,10 @@ struct SaleDetailView: View {
                 detailRow(title: "Source", value: sale.sourceText)
                 detailRow(title: "Status", value: sale.status?.capitalized ?? "Unknown")
                 detailRow(title: "Payment Status", value: sale.paymentStatusText)
+                detailRow(title: "Payment Method", value: sale.paymentMethodText)
+                if let paymentReference = sale.paymentReferenceText {
+                    detailRow(title: sale.paymentReferenceLabel, value: paymentReference)
+                }
                 if sale.hasReturns {
                     detailRow(title: "Returned", value: sale.returnedAmountText)
                 }

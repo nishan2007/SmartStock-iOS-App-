@@ -14,7 +14,10 @@ struct InventoryDetailView: View {
     @State private var isShowingEditor = false
     @State private var displayedItem: InventoryItem
     @State private var isLoadingCurrentStoreItem = false
+    @State private var isLoadingStoreAvailability = false
+    @State private var storeAvailability: [InventoryItem] = []
     @State private var currentStoreErrorMessage: String?
+    @State private var storeAvailabilityErrorMessage: String?
 
     private let inventoryService = InventoryService()
 
@@ -38,6 +41,10 @@ struct InventoryDetailView: View {
 
     private var canViewCreatedBy: Bool {
         sessionManager.currentUser?.canAccess(.viewCreatedBy) == true
+    }
+
+    private var canViewAllStoresInventory: Bool {
+        sessionManager.currentUser?.canAccess(.viewAllStoresInventory) == true
     }
 
     var body: some View {
@@ -98,6 +105,38 @@ struct InventoryDetailView: View {
                 }
                 detailRow(label: "Selling Price", value: displayedItem.formattedPrice)
             }
+
+            if canViewAllStoresInventory {
+                Section("Store Availability") {
+                    if isLoadingStoreAvailability {
+                        ProgressView("Loading store availability...")
+                            .frame(maxWidth: .infinity, alignment: .center)
+                    } else if let storeAvailabilityErrorMessage {
+                        Text(storeAvailabilityErrorMessage)
+                            .foregroundStyle(.red)
+                    } else if storeAvailability.isEmpty {
+                        Text("No other store inventory found for this item.")
+                            .foregroundStyle(.secondary)
+                    } else {
+                        ForEach(storeAvailability) { storeItem in
+                            HStack(alignment: .center) {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(storeItem.locationName)
+                                        .font(.headline)
+                                    InventoryStatusBadge(status: storeItem.status)
+                                }
+
+                                Spacer(minLength: 16)
+
+                                Text(storeItem.quantityText)
+                                    .font(.title3.weight(.semibold))
+                                    .monospacedDigit()
+                            }
+                            .padding(.vertical, 4)
+                        }
+                    }
+                }
+            }
         }
         .navigationTitle("Item Details")
         .navigationBarTitleDisplayMode(.inline)
@@ -121,6 +160,7 @@ struct InventoryDetailView: View {
         }
         .task {
             await loadCurrentStoreItemIfNeeded()
+            await loadStoreAvailabilityIfNeeded()
         }
     }
 
@@ -179,6 +219,24 @@ struct InventoryDetailView: View {
             }
         } catch {
             currentStoreErrorMessage = error.localizedDescription
+        }
+    }
+
+    private func loadStoreAvailabilityIfNeeded() async {
+        guard canViewAllStoresInventory else { return }
+
+        isLoadingStoreAvailability = true
+        storeAvailabilityErrorMessage = nil
+        defer { isLoadingStoreAvailability = false }
+
+        do {
+            storeAvailability = try await inventoryService
+                .fetchInventoryItems(productId: item.productId)
+                .sorted {
+                    $0.locationName.localizedCaseInsensitiveCompare($1.locationName) == .orderedAscending
+                }
+        } catch {
+            storeAvailabilityErrorMessage = error.localizedDescription
         }
     }
 }

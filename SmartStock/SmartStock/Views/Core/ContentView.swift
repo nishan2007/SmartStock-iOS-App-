@@ -14,7 +14,7 @@ struct ContentView: View {
     var body: some View {
         Group {
             if sessionManager.isLoading && sessionManager.currentUser == nil {
-                ProgressView("Loading...")
+                LoadingView(text: "Starting SmartStock...", showsBranding: true)
             } else if sessionManager.currentUser == nil {
                 LoginView()
                     .environmentObject(sessionManager)

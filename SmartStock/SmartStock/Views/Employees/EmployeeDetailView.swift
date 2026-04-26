@@ -14,6 +14,14 @@ import SwiftUI
 
 struct EmployeeDetailView: View {
     let employee: Employee
+    @State private var assignedStores: [Store]
+    @State private var isLoadingStores = false
+    @State private var storeErrorMessage: String?
+
+    init(employee: Employee) {
+        self.employee = employee
+        _assignedStores = State(initialValue: employee.assignedStores)
+    }
 
     var body: some View {
         List {
@@ -37,11 +45,16 @@ struct EmployeeDetailView: View {
             }
 
             Section("Assigned Stores") {
-                if employee.assignedStores.isEmpty {
+                if isLoadingStores {
+                    ProgressView("Loading stores...")
+                } else if let storeErrorMessage {
+                    Text(storeErrorMessage)
+                        .foregroundStyle(.red)
+                } else if assignedStores.isEmpty {
                     Text("No assigned stores")
                         .foregroundColor(.secondary)
                 } else {
-                    ForEach(employee.assignedStores) { store in
+                    ForEach(assignedStores) { store in
                         VStack(alignment: .leading, spacing: 4) {
                             Text(store.name)
 
@@ -56,6 +69,23 @@ struct EmployeeDetailView: View {
             }
         }
         .navigationTitle("Employee Details")
+        .task {
+            await loadAssignedStores()
+        }
+    }
+
+    private func loadAssignedStores() async {
+        isLoadingStores = true
+        storeErrorMessage = nil
+        defer { isLoadingStores = false }
+
+        do {
+            assignedStores = try await EmployeeService.shared.fetchEmployeeStores(employeeId: employee.id)
+        } catch {
+            if assignedStores.isEmpty {
+                storeErrorMessage = error.localizedDescription
+            }
+        }
     }
 
     @ViewBuilder

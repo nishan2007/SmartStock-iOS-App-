@@ -176,6 +176,19 @@ final class EmployeeService {
         }
     }
 
+    func fetchEmployeeStores(employeeId: Int) async throws -> [Store] {
+        let rows: [EmployeeStoreAssignmentRow] = try await client
+            .from("user_locations")
+            .select("location_id, locations!user_locations_location_id_fkey(location_id, name, address, created_at)")
+            .eq("user_id", value: employeeId)
+            .execute()
+            .value
+
+        return rows.map { row in
+            row.locations ?? Store(id: row.location_id, name: "Store #\(row.location_id)", address: nil, createdAt: nil)
+        }
+    }
+
     func toggleEmployeeActive(employeeId: Int, isActive: Bool) async throws {
         _ = try await client
             .from("users")

@@ -47,6 +47,7 @@ struct MakeSaleView: View {
     @State private var customerAccounts: [CustomerAccount] = []
     @State private var selectedCustomerAccountId: Int?
     @State private var cashCollectedText = ""
+    @State private var paymentReferenceText = ""
     @State private var isShowingCheckoutSheet = false
     @State private var isCheckingOut = false
     @State private var checkoutMessage: String?
@@ -379,6 +380,9 @@ struct MakeSaleView: View {
                 if newMethod == .cash {
                     cashCollectedText = String(format: "%.2f", total)
                 }
+                if newMethod == .cash || newMethod == .account {
+                    paymentReferenceText = ""
+                }
             }
             .task {
                 await loadCustomerAccounts()
@@ -504,6 +508,7 @@ struct MakeSaleView: View {
         paymentMethod = .cash
         selectedCustomerAccountId = nil
         cashCollectedText = ""
+        paymentReferenceText = ""
         isSearchFieldFocused = true
     }
     func handleScannedBarcode(_ code: String) async {
@@ -682,6 +687,11 @@ struct MakeSaleView: View {
             return
         }
 
+        if requiresPaymentReference && trimmedPaymentReference.isEmpty {
+            checkoutError = paymentMethod == .card ? "Enter the card transaction ID." : "Enter the cheque number."
+            return
+        }
+
         isCheckingOut = true
         checkoutError = nil
         checkoutMessage = nil
@@ -693,7 +703,8 @@ struct MakeSaleView: View {
                 user: user,
                 store: store,
                 paymentMethod: paymentMethod.checkoutMethod,
-                customerAccountId: selectedCustomerAccountId
+                customerAccountId: selectedCustomerAccountId,
+                paymentReference: trimmedPaymentReference
             )
 
             cart.removeAll()
@@ -704,6 +715,7 @@ struct MakeSaleView: View {
             paymentMethod = .cash
             selectedCustomerAccountId = nil
             cashCollectedText = ""
+            paymentReferenceText = ""
             isShowingCheckoutSheet = false
             isSearchFieldFocused = true
             checkoutMessage = "Sale completed successfully."
@@ -789,6 +801,18 @@ struct MakeSaleView: View {
                     }
                 }
 
+                if requiresPaymentReference {
+                    Section(paymentReferenceSectionTitle) {
+                        TextField(paymentReferencePlaceholder, text: $paymentReferenceText)
+                            .textInputAutocapitalization(.characters)
+                            .autocorrectionDisabled(true)
+
+                        Text(paymentMethod == .card ? "This stores the processor transaction ID for lookup later." : "This stores the cheque number for the sale.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
                 Section(paymentMethod == .account ? "Customer Account" : "Customer Account (Optional)") {
                     Picker("Customer", selection: $selectedCustomerAccountId) {
                         Text(paymentMethod == .account ? "Select customer" : "No customer").tag(Int?.none)
@@ -829,6 +853,7 @@ struct MakeSaleView: View {
                         isCheckingOut
                         || (paymentMethod == .account && selectedCustomerAccountId == nil)
                         || (paymentMethod == .cash && (cashCollectedAmount ?? 0) < total)
+                        || (requiresPaymentReference && trimmedPaymentReference.isEmpty)
                     )
                 }
             }
@@ -839,5 +864,21 @@ struct MakeSaleView: View {
                 cashCollectedText = String(format: "%.2f", total)
             }
         }
+    }
+
+    private var requiresPaymentReference: Bool {
+        paymentMethod == .card || paymentMethod == .cheque
+    }
+
+    private var trimmedPaymentReference: String {
+        paymentReferenceText.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var paymentReferenceSectionTitle: String {
+        paymentMethod == .card ? "Card Transaction" : "Cheque Details"
+    }
+
+    private var paymentReferencePlaceholder: String {
+        paymentMethod == .card ? "Transaction ID" : "Cheque number"
     }
 }

@@ -66,6 +66,7 @@ values
   ('device_management', 'Device Management', 'Device', 300),
   ('device_receipt_settings', 'Local Device Settings', 'Device', 305),
   ('inventory', 'View Inventory List', 'Inventory', 100),
+  ('view_all_stores_inventory', 'View All Stores Inventory', 'Inventory', 105),
   ('receiving', 'Receiving Inventory', 'Inventory', 110),
   ('store_transfer', 'Store Transfer', 'Inventory', 120),
   ('verify_store_transfer_quantity', 'Verify Store Transfer Quantity', 'Inventory', 121),

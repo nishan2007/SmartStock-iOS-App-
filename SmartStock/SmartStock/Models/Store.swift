@@ -29,3 +29,8 @@ struct Store: Decodable, Identifiable, Equatable, Hashable {
 struct UserLocationStoreRow: Decodable {
     let locations: Store
 }
+
+struct EmployeeStoreAssignmentRow: Decodable {
+    let location_id: Int
+    let locations: Store?
+}

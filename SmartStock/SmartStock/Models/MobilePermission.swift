@@ -34,6 +34,7 @@ enum MobilePermission: String, CaseIterable, Identifiable, Codable, Hashable {
     case timeClock = "time_clock"
     case vendorManagement = "vendor_management"
     case viewCostPrice = "view_cost_price"
+    case viewAllStoresInventory = "view_all_stores_inventory"
     case viewCreatedBy = "view_created_by"
     case viewItemDetails = "view_item_details"
     case viewReceivingHistory = "view_receiving_history"
@@ -102,6 +103,8 @@ enum MobilePermission: String, CaseIterable, Identifiable, Codable, Hashable {
             return "Vendor Management"
         case .viewCostPrice:
             return "View Cost Price"
+        case .viewAllStoresInventory:
+            return "View All Stores Inventory"
         case .viewCreatedBy:
             return "View Created By"
         case .viewItemDetails:
@@ -123,7 +126,7 @@ enum MobilePermission: String, CaseIterable, Identifiable, Codable, Hashable {
         switch self {
         case .makeSale, .viewSales, .returns, .endOfDay, .customers, .manageCustomers, .editCustomerCreditLimit, .editAccountNumber, .applySaleDiscount, .changeSaleItemPrice:
             return "Sales"
-        case .inventory, .receiving, .storeTransfer, .verifyStoreTransferQuantity, .editItem, .addNewItem, .adjustInventoryQuantity, .viewCostPrice, .viewItemDetails, .viewCreatedBy, .departmentManagement, .vendorManagement, .viewVendor, .viewReceivingHistory:
+        case .inventory, .receiving, .storeTransfer, .verifyStoreTransferQuantity, .editItem, .addNewItem, .adjustInventoryQuantity, .viewCostPrice, .viewAllStoresInventory, .viewItemDetails, .viewCreatedBy, .departmentManagement, .vendorManagement, .viewVendor, .viewReceivingHistory:
             return "Inventory"
         case .timeClock:
             return "Employee"
