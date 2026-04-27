@@ -18,38 +18,66 @@ struct TimeClockView: View {
     @State private var isSubmitting = false
     @State private var errorMessage: String?
     @State private var successMessage: String?
+    
+    // Dialogs
     @State private var showClockOutConfirmation = false
     @State private var showShiftEndedAlert = false
-    
+  
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(spacing: 16) {
-                    // Status Header
-                    VStack(spacing: 6) {
+                VStack(spacing: 20) {
+                    // Glass Status Header
+                    VStack(spacing: 8) {
                         Image(systemName: statusIconName)
-                            .font(.system(size: 44))
+                            .font(.system(size: 52))
                             .foregroundStyle(statusColor)
+                        
                         Text(statusTitle)
-                            .font(.title3.weight(.bold))
+                            .font(.title2.weight(.bold))
+                        
                         Text(sessionManager.currentUser?.fullName ?? "Current user")
+                            .font(.subheadline)
                             .foregroundStyle(.secondary)
-                            .lineLimit(1)
                     }
                     .frame(maxWidth: .infinity)
-                    .padding(.vertical, 20)
-                    .padding(.horizontal, 16)
-                    .background(Color(.secondarySystemBackground))
-                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .padding(.vertical, 28)
+                    .background(.regularMaterial)                    // ← Stronger material
+                    .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 24).stroke(.white.opacity(0.25), lineWidth: 1))
+                    .shadow(color: .black.opacity(0.12), radius: 20, y: 10)
                   
                     if let errorMessage {
                         Text(errorMessage)
                             .foregroundStyle(.red)
                             .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 8)
                     }
                   
-                    // MARK: - Today Section
-                    VStack(alignment: .leading, spacing: 8) {
+                    // Stale Shift Warning
+                    if hasStaleOpenShift {
+                        HStack(spacing: 14) {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .foregroundStyle(.orange)
+                                .font(.title2)
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("Open shift from a previous day")
+                                    .font(.headline)
+                                Text("You forgot to clock out last shift.\nPlease screenshot this screen and message your manager/admin so they can manually clock you out.")
+                                    .font(.subheadline)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                        }
+                        .padding(18)
+                        .background(.regularMaterial)
+                        .clipShape(RoundedRectangle(cornerRadius: 20))
+                        .overlay(RoundedRectangle(cornerRadius: 20).stroke(.white.opacity(0.25), lineWidth: 1))
+                        .shadow(color: .black.opacity(0.12), radius: 12)
+                    }
+                  
+                    // Today Section - Glass Card
+                    VStack(alignment: .leading, spacing: 12) {
                         HStack {
                             Text("Today")
                                 .font(.headline)
@@ -67,10 +95,10 @@ struct TimeClockView: View {
                                 .foregroundStyle(.secondary)
                                 .italic()
                                 .frame(maxWidth: .infinity, alignment: .center)
-                                .padding(.vertical, 8)
+                                .padding(.vertical, 20)
                         } else {
                             ForEach(todaysEntries, id: \.clockId) { entry in
-                                VStack(alignment: .leading, spacing: 6) {
+                                VStack(alignment: .leading, spacing: 8) {
                                     statusRow(title: "Clocked In", date: entry.clockIn)
                                     if let lunchStart = entry.lunchStart {
                                         statusRow(title: "Lunch Started", date: lunchStart)
@@ -86,65 +114,64 @@ struct TimeClockView: View {
                         }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding()
-                    .background(Color(.secondarySystemBackground))
-                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .padding(20)
+                    .background(.regularMaterial)
+                    .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 24).stroke(.white.opacity(0.25), lineWidth: 1))
+                    .shadow(color: .black.opacity(0.12), radius: 16, y: 8)
                   
+                    // Summary Glass Card
                     if let compensationProfile {
-                        VStack(alignment: .leading, spacing: 8) {
+                        VStack(alignment: .leading, spacing: 12) {
                             Text("Summary")
                                 .font(.headline)
-                            
-                            
-                            
+                          
                             if let currentPayPeriodText = compensationProfile.currentPayPeriodText {
                                 payRow(title: "Period", value: currentPayPeriodText)
                             }
-                            
                             if let payPeriod = compensationProfile.payPeriod, !payPeriod.isEmpty {
                                 payRow(title: "Frequency", value: payPeriod.replacingOccurrences(of: "_", with: " ").capitalized)
                             }
-                            
                             payRow(title: "Compensation", value: compensationProfile.compensationType.displayName)
-
+                          
                             if let rateLabel = compensationProfile.rateLabel, let rateAmount = compensationProfile.rateAmount {
                                 payRow(title: rateLabel, value: currency(rateAmount))
                             }
-                            
-                           
-                            
+                          
                             if compensationProfile.compensationType == .hourly {
                                 if let hoursWorkedThisPeriod {
                                     payRow(title: "Total Hours", value: String(format: "%.2f hours", hoursWorkedThisPeriod))
                                 } else {
-                                    payRow(title: "Total Hours, value: ",value: "Unavailable")
+                                    payRow(title: "Total Hours", value: "Unavailable")
                                 }
                             }
-                            
-                            // NEW: Total Pay for the Period (All Types)
+                          
                             if let totalPay = totalPayThisPeriod {
                                 payRow(title: "Total Pay", value: currency(totalPay))
                                     .fontWeight(.semibold)
                                     .foregroundStyle(.green)
                             }
-                            
+                          
                             if let payDate = compensationProfile.resolvedPayDate() {
                                 payRow(title: "Pay Date", value: payDate.formatted(date: .abbreviated, time: .omitted))
                             }
-                           
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding()
-                        .background(Color(.secondarySystemBackground))
-                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                        .padding(20)
+                        .background(.regularMaterial)
+                        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+                        .overlay(RoundedRectangle(cornerRadius: 24).stroke(.white.opacity(0.25), lineWidth: 1))
+                        .shadow(color: .black.opacity(0.12), radius: 16, y: 8)
                     }
                   
-                    // Notes
-                    TextField("Notes", text: $notes, axis: .vertical)
-                        .lineLimit(2...4)
-                        .padding()
-                        .background(Color(.secondarySystemBackground))
-                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    // Notes Card
+                    TextField("Notes (optional)", text: $notes, axis: .vertical)
+                        .lineLimit(3...6)
+                        .padding(18)
+                        .background(.regularMaterial)
+                        .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+                        .overlay(RoundedRectangle(cornerRadius: 20).stroke(.white.opacity(0.25), lineWidth: 1))
+                        .shadow(color: .black.opacity(0.08), radius: 12)
                   
                     if let successMessage {
                         Text(successMessage)
@@ -187,12 +214,9 @@ struct TimeClockView: View {
                 .padding(.bottom, 8)
                 .background(.ultraThinMaterial)
             }
+            
             // Modern Clock Out Confirmation
-            .confirmationDialog(
-                "End Shift?",
-                isPresented: $showClockOutConfirmation,
-                titleVisibility: .visible
-            ) {
+            .confirmationDialog("End Shift?", isPresented: $showClockOutConfirmation, titleVisibility: .visible) {
                 Button("Yes, Clock Out", role: .destructive) {
                     Task { await performClockOut() }
                 }
@@ -209,18 +233,19 @@ struct TimeClockView: View {
             }
             
             // Shift Already Ended Alert
-            .alert("Shift Ended", isPresented: $showShiftEndedAlert) {
+            .alert("Shift Already Ended", isPresented: $showShiftEndedAlert) {
                 Button("OK", role: .cancel) {}
             } message: {
                 Text("You have already clocked out for today.\nYou cannot clock back in.")
             }
+            
             .task {
                 await loadCurrentState()
             }
         }
     }
   
-    // MARK: - Computed Properties
+    // MARK: - Computed Properties (unchanged)
     private var isClockedIn: Bool { activeEntry?.isOpen == true }
     
     private var isOnLunch: Bool {
@@ -248,38 +273,36 @@ struct TimeClockView: View {
         return latest.clockOut ?? latest.lunchEnd ?? latest.lunchStart ?? latest.clockIn
     }
     
-    // MARK: - Total Pay Calculation (Salary + Daily + Hourly)
+    private var hasStaleOpenShift: Bool {
+        guard let entry = activeEntry else { return false }
+        return !Calendar.current.isDateInToday(entry.clockIn)
+    }
+    
     private var totalPayThisPeriod: Double? {
         guard let profile = compensationProfile,
-              let rate = profile.rateAmount,
-              let interval = profile.payPeriodRange() else {
+              let rate = profile.rateAmount else {
             return nil
         }
-        
-        let calendar = Calendar.current
-        let daysInPeriod = calendar.dateComponents([.day], from: interval.start, to: interval.end).day ?? 0
         
         switch profile.compensationType {
         case .hourly:
             guard let hours = hoursWorkedThisPeriod else { return nil }
-            
-            // Round hours to 2 decimal places first
             let roundedHours = (hours * 100).rounded() / 100
-            
-            // Then multiply by rate
             let rawPay = rate * roundedHours
-            
-            // Round final pay to 2 decimal places
             return (rawPay * 100).rounded() / 100
             
         case .daily:
-            return rate * Double(daysInPeriod)
+            guard let interval = profile.payPeriodRange() else { return nil }
+            let days = Calendar.current.dateComponents([.day], from: interval.start, to: interval.end).day ?? 0
+            let rawPay = rate * Double(days)
+            return (rawPay * 100).rounded() / 100
             
         case .salary:
-            // Assuming rateAmount is annual salary
-            let daysInYear = 365.0
-            let dailyRate = rate / daysInYear
-            return dailyRate * Double(daysInPeriod)
+            guard let interval = profile.payPeriodRange() else { return nil }
+            let daysInPeriod = Calendar.current.dateComponents([.day], from: interval.start, to: interval.end).day ?? 0
+            let dailyRate = rate / 365.0
+            let rawPay = dailyRate * Double(daysInPeriod)
+            return (rawPay * 100).rounded() / 100
             
         default:
             return nil
@@ -287,6 +310,7 @@ struct TimeClockView: View {
     }
     
     private var primaryAction: TimeClockAction? {
+        guard !hasStaleOpenShift else { return nil }
         if let activeEntry {
             if activeEntry.lunchStart == nil { return .startLunch }
             if activeEntry.lunchEnd == nil { return .endLunch }
@@ -296,7 +320,7 @@ struct TimeClockView: View {
     }
     
     private var secondaryAction: TimeClockAction? {
-        guard let activeEntry, activeEntry.lunchStart == nil else { return nil }
+        guard !hasStaleOpenShift, let activeEntry, activeEntry.lunchStart == nil else { return nil }
         return .clockOut
     }
     
@@ -312,15 +336,38 @@ struct TimeClockView: View {
             todaysEntries = try await service.fetchTimeClockEntriesForToday(userId: user.id)
             compensationProfile = try await service.fetchTimeClockCompensationProfile(userId: user.id)
             hoursWorkedThisPeriod = try await loadHoursWorkedThisPeriod(for: user.id, profile: compensationProfile)
+            
+            await checkAndAutoEndStaleLunch()
         } catch {
             errorMessage = error.localizedDescription
         }
     }
     
+    // MARK: - Auto End Lunch After 1.5 Hours
+    private func checkAndAutoEndStaleLunch() async {
+        guard let entry = activeEntry,
+              let lunchStart = entry.lunchStart,
+              entry.lunchEnd == nil else { return }
+        
+        let elapsed = Date().timeIntervalSince(lunchStart)
+        guard elapsed > 1.5 * 3600 else { return }
+        
+        do {
+            let updated = try await service.endLunch(entryId: entry.clockId)
+            self.activeEntry = updated
+            successMessage = "Lunch automatically ended (1.5 hours elapsed)"
+            
+            if let userId = sessionManager.currentUser?.id {
+                todaysEntries = try await service.fetchTimeClockEntriesForToday(userId: userId)
+                activeEntry = try await service.fetchOpenTimeClockEntry(userId: userId)
+                hoursWorkedThisPeriod = try await loadHoursWorkedThisPeriod(for: userId, profile: compensationProfile)
+            }
+        } catch {}
+    }
+    
+    // MARK: - Actions
     private func perform(_ action: TimeClockAction) {
-        Task {
-            await performAction(action)
-        }
+        Task { await performAction(action) }
     }
     
     private func performAction(_ action: TimeClockAction) async {
@@ -334,15 +381,13 @@ struct TimeClockView: View {
         do {
             switch action {
             case .clockIn:
-                    if activeEntry == nil && !todaysEntries.isEmpty {
-                        // Prevent clocking back in after clocking out
-                        showShiftEndedAlert = true
-                        return
-                    }
-                    let inserted = try await service.clockIn(user: user, store: sessionManager.selectedStore)
-                    self.activeEntry = inserted
-                    successMessage = "Clocked in successfully."
-            
+                if activeEntry == nil && !todaysEntries.isEmpty {
+                    showShiftEndedAlert = true
+                    return
+                }
+                let inserted = try await service.clockIn(user: user, store: sessionManager.selectedStore)
+                self.activeEntry = inserted
+                successMessage = "Clocked in successfully."
                 
             case .startLunch:
                 guard let entry = activeEntry else { return }
@@ -357,8 +402,8 @@ struct TimeClockView: View {
                 successMessage = "Lunch ended successfully."
                 
             case .clockOut:
-                showClockOutConfirmation = true   // Show confirmation
-                return   // Don't clock out yet
+                showClockOutConfirmation = true
+                return
             }
             
             notes = ""
@@ -393,6 +438,7 @@ struct TimeClockView: View {
             errorMessage = error.localizedDescription
         }
     }
+    
     // MARK: - View Builders
     @ViewBuilder
     private func actionButton(for action: TimeClockAction, prominent: Bool) -> some View {

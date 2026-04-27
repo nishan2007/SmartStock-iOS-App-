@@ -4,21 +4,21 @@
 //
 //  Created by Nishan Narain on 4/15/26.
 //
-
+ 
 import SwiftUI
 import Supabase
-
-
-
+ 
+ 
+ 
 struct MakeSaleView: View {
     private enum SalePaymentMethod: String, CaseIterable, Identifiable {
         case cash = "CASH"
         case card = "CARD"
         case cheque = "CHEQUE"
         case account = "ACCOUNT"
-
+ 
         var id: String { rawValue }
-
+ 
         var title: String {
             switch self {
             case .cash: return "Cash"
@@ -27,7 +27,7 @@ struct MakeSaleView: View {
             case .account: return "Account Credit"
             }
         }
-
+ 
         var checkoutMethod: CheckoutPaymentMethod {
             switch self {
             case .cash: return .cash
@@ -37,9 +37,9 @@ struct MakeSaleView: View {
             }
         }
     }
-
+ 
     @EnvironmentObject var sessionManager: SessionManager
-
+ 
     @State private var searchText = ""
     @State private var products: [Product] = []
     @State private var cart: [CartItem] = []
@@ -61,11 +61,11 @@ struct MakeSaleView: View {
     @State private var editedItemDiscountText = ""
     @FocusState private var isSearchFieldFocused: Bool
     @State private var searchTask: Task<Void, Never>?
-
+ 
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
-
+ 
                 // 🔍 Search Bar + Overlay Results
                 ZStack(alignment: .top) {
                     VStack(spacing: 0) {
@@ -73,7 +73,7 @@ struct MakeSaleView: View {
                             Image(systemName: "magnifyingglass")
                                 .font(.title3.weight(.semibold))
                                 .foregroundStyle(.secondary)
-
+ 
                             TextField("Product Lookup", text: $searchText)
                                 .focused($isSearchFieldFocused)
                                 .textInputAutocapitalization(.never)
@@ -87,11 +87,11 @@ struct MakeSaleView: View {
                                 .onChange(of: searchText) {
                                     scheduleSearch()
                                 }
-
+ 
                             Rectangle()
                                 .fill(.white.opacity(0.28))
                                 .frame(width: 1, height: 30)
-
+ 
                             Button {
                                 checkoutError = nil
                                 checkoutMessage = nil
@@ -130,7 +130,7 @@ struct MakeSaleView: View {
                                 .stroke(Color.black.opacity(0.68), lineWidth: 2.2)
                         }
                         .shadow(color: .black.opacity(0.08), radius: 14, y: 8)
-
+ 
                         if let scannerError {
                             Text(scannerError)
                                 .font(.caption)
@@ -139,7 +139,7 @@ struct MakeSaleView: View {
                                 .padding(.top, 6)
                         }
                     }
-
+ 
                     if isShowingSearchResults {
                         ScrollView {
                             VStack(spacing: 0) {
@@ -147,19 +147,24 @@ struct MakeSaleView: View {
                                     Button {
                                         addToCart(product)
                                     } label: {
-                                        HStack(alignment: .top, spacing: 12) {
+                                        HStack(spacing: 12) {
+                                            // ✅ Product image (exactly like the cart)
+                                            cartItemImage(for: product)
+                                                .frame(width: 48, height: 48)
+                                                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+ 
                                             VStack(alignment: .leading, spacing: 4) {
                                                 Text(product.name)
                                                     .font(.headline)
                                                     .foregroundColor(.primary)
                                                     .lineLimit(1)
-
+ 
                                                 if let price = product.price {
                                                     Text("Price: $\(price, specifier: "%.2f")")
                                                         .font(.subheadline)
                                                         .foregroundColor(.secondary)
                                                 }
-
+ 
                                                 if let sku = product.sku, !sku.isEmpty {
                                                     Text("SKU: \(sku)")
                                                         .font(.caption)
@@ -168,27 +173,26 @@ struct MakeSaleView: View {
                                                 }
                                             }
                                             .frame(maxWidth: .infinity, alignment: .leading)
-
+ 
                                             Image(systemName: "plus.circle.fill")
                                                 .font(.title3)
                                                 .foregroundColor(.accentColor)
-                                                .padding(.top, 2)
                                         }
                                         .padding(.horizontal, 14)
-                                        .padding(.vertical, 8)
-                                        .frame(maxWidth: .infinity, minHeight: 58, alignment: .topLeading)
+                                        .padding(.vertical, 10)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
                                         .background(Color(.systemBackground))
                                         .contentShape(Rectangle())
                                     }
-
+ 
                                     if product.id != products.last?.id {
                                         Divider()
-                                            .padding(.leading)
+                                            .padding(.leading, 74)   // indent past the image
                                     }
                                 }
                             }
                         }
-                        .frame(maxHeight: 176)
+                        .frame(maxHeight: 230)          // increased from 176 to fit taller rows with images
                         .background(Color(.systemBackground))
                         .clipShape(RoundedRectangle(cornerRadius: 12))
                         .overlay(
@@ -215,223 +219,223 @@ struct MakeSaleView: View {
                 .zIndex(1)
 
                 VStack(spacing: 0) {
-                    if cart.isEmpty {
-                        Spacer()
-
-                        VStack(spacing: 10) {
-                            Image(systemName: "cart")
-                                .font(.system(size: 44))
-                                .foregroundColor(.secondary)
-
-                            Text("Cart is empty")
-                                .font(.headline)
-
-                            Text("Search for a product to add it to the sale.")
-                                .foregroundColor(.secondary)
-                                .multilineTextAlignment(.center)
-                        }
-                        .padding()
-
-                        Spacer()
-                    } else {
-                        List {
-                            ForEach(cart) { item in
-                                HStack(spacing: 16) {
-                                    cartItemImage(for: item.product)
-                                        .frame(width: 54, height: 54)
-                                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-
-                                    VStack(alignment: .leading, spacing: 4) {
-                                        Text(item.product.name)
-                                            .font(.headline)
-                                            .lineLimit(2)
-
-                                        Text("ID: \(item.product.id)")
-                                            .font(.subheadline)
-                                            .foregroundColor(.secondary)
-
-                                        if item.discountAmount > 0 {
-                                            Text("Item discount: -$\(item.discountAmount, specifier: "%.2f")")
-                                                .font(.caption)
-                                                .foregroundColor(.orange)
+                                    if cart.isEmpty {
+                                        Spacer()
+                 
+                                        VStack(spacing: 10) {
+                                            Image(systemName: "cart")
+                                                .font(.system(size: 44))
+                                                .foregroundColor(.secondary)
+                 
+                                            Text("Cart is empty")
+                                                .font(.headline)
+                 
+                                            Text("Search for a product to add it to the sale.")
+                                                .foregroundColor(.secondary)
+                                                .multilineTextAlignment(.center)
                                         }
+                                        .padding()
+                 
+                                        Spacer()
+                                    } else {
+                                        List {
+                                            ForEach(cart) { item in
+                                                HStack(spacing: 16) {
+                                                    cartItemImage(for: item.product)
+                                                        .frame(width: 54, height: 54)
+                                                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                 
+                                                    VStack(alignment: .leading, spacing: 4) {
+                                                        Text(item.product.name)
+                                                            .font(.headline)
+                                                            .lineLimit(2)
+                 
+                                                        Text("ID: \(item.product.id)")
+                                                            .font(.subheadline)
+                                                            .foregroundColor(.secondary)
+                 
+                                                        if item.discountAmount > 0 {
+                                                            Text("Item discount: -$\(item.discountAmount, specifier: "%.2f")")
+                                                                .font(.caption)
+                                                                .foregroundColor(.orange)
+                                                        }
+                                                    }
+                 
+                                                    Spacer()
+                 
+                                                    HStack(spacing: 8) {
+                                                        Button {
+                                                            decreaseQuantity(for: item)
+                                                        } label: {
+                                                            Image(systemName: "minus.circle.fill")
+                                                                .font(.title3)
+                                                        }
+                                                        .buttonStyle(.plain)
+                 
+                                                        Text("\(item.quantity)")
+                                                            .frame(minWidth: 24)
+                 
+                                                        Button {
+                                                            increaseQuantity(for: item)
+                                                        } label: {
+                                                            Image(systemName: "plus.circle.fill")
+                                                                .font(.title3)
+                                                        }
+                                                        .buttonStyle(.plain)
+                                                    }
+                 
+                                                    Text("$\(item.lineTotal, specifier: "%.2f")")
+                                                        .font(.headline)
+                                                        .frame(minWidth: 70, alignment: .trailing)
+                                                }
+                                                .padding(.vertical, 2)
+                                                .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
+                                                .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                                                    if canApplySaleDiscount {
+                                                        Button("Discount") {
+                                                            editingDiscountItemID = item.id
+                                                            editedItemDiscountText = String(format: "%.2f", item.discountAmount)
+                                                        }
+                                                        .tint(.orange)
+                                                    }
+                 
+                                                    if canChangeSaleItemPrice {
+                                                        Button("Price") {
+                                                            editingPriceItemID = item.id
+                                                            editedUnitPriceText = String(format: "%.2f", item.unitPrice)
+                                                        }
+                                                        .tint(.blue)
+                                                    }
+                                                }
+                                            }
+                                            .onDelete(perform: removeFromCart)
+                                        }
+                                        .listStyle(.plain)
+                                        .listRowSpacing(6)
+                                        .contentMargins(.top, 12, for: .scrollContent)
                                     }
-
+                 
+                                    Divider()
+                 
+                                    VStack {
+                                        HStack(spacing: 16) {
+                                            Text("Subtotal: $\(subtotal, specifier: "%.2f")")
+                                                .font(.subheadline)
+                 
+                                            Text("Total: $\(total, specifier: "%.2f")")
+                                                .font(.headline)
+                                        }
+                 
+                                        if itemDiscountTotal > 0 {
+                                            Text("Item Discounts: -$\(itemDiscountTotal, specifier: "%.2f")")
+                                                .font(.subheadline)
+                                                .foregroundColor(.secondary)
+                                        }
+                 
+                                        if let checkoutError {
+                                            Text(checkoutError)
+                                                .foregroundColor(.red)
+                                                .font(.subheadline)
+                                                .multilineTextAlignment(.center)
+                                        }
+                 
+                                        if let checkoutMessage {
+                                            Text(checkoutMessage)
+                                                .foregroundColor(.green)
+                                                .font(.subheadline)
+                                                .multilineTextAlignment(.center)
+                                        }
+                 
+                                        Button {
+                                            checkoutError = nil
+                                            checkoutMessage = nil
+                                            isShowingCheckoutSheet = true
+                                        } label: {
+                                            if isCheckingOut {
+                                                ProgressView()
+                                                    .frame(maxWidth: .infinity)
+                                            } else {
+                                                Text("Checkout")
+                                                    .frame(maxWidth: .infinity)
+                                            }
+                                        }
+                                        .buttonStyle(.borderedProminent)
+                                        .disabled(cart.isEmpty || isCheckingOut)
+                                    }
+                                    .padding()
+                                }
+                                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            }
+                            .navigationBarTitleDisplayMode(.inline)
+                            .toolbar {
+                                ToolbarItem(placement: .principal) {
+                                    Text("Make Sale")
+                                        .font(.title2.weight(.semibold))
+                                }
+                            }
+                            .contentShape(Rectangle())
+                            .onTapGesture {
+                                isSearchFieldFocused = false
+                            }
+                            .alert("Change Item Price", isPresented: isEditingItemPrice) {
+                                TextField("Unit price", text: $editedUnitPriceText)
+                                    .keyboardType(.decimalPad)
+                                Button("Cancel", role: .cancel) {
+                                    editingPriceItemID = nil
+                                }
+                                Button("Save") {
+                                    applyEditedPrice()
+                                }
+                            } message: {
+                                Text("Update the unit price for this cart item.")
+                            }
+                            .alert("Item Discount", isPresented: isEditingItemDiscount) {
+                                TextField("Discount amount", text: $editedItemDiscountText)
+                                    .keyboardType(.decimalPad)
+                                Button("Cancel", role: .cancel) {
+                                    editingDiscountItemID = nil
+                                }
+                                Button("Save") {
+                                    applyEditedItemDiscount()
+                                }
+                            } message: {
+                                Text("Apply a discount to this cart line.")
+                            }
+                            .onDisappear {
+                                searchTask?.cancel()
+                            }
+                            .safeAreaInset(edge: .bottom, spacing: 0) {
+                                VStack(spacing: 6) {
                                     Spacer()
-
-                                    HStack(spacing: 8) {
-                                        Button {
-                                            decreaseQuantity(for: item)
-                                        } label: {
-                                            Image(systemName: "minus.circle.fill")
-                                                .font(.title3)
-                                        }
-                                        .buttonStyle(.plain)
-
-                                        Text("\(item.quantity)")
-                                            .frame(minWidth: 24)
-
-                                        Button {
-                                            increaseQuantity(for: item)
-                                        } label: {
-                                            Image(systemName: "plus.circle.fill")
-                                                .font(.title3)
-                                        }
-                                        .buttonStyle(.plain)
+                                        .frame(height: 18)
+                 
+                                    Button("Clear Cart") {
+                                        clearCart()
                                     }
-
-                                    Text("$\(item.lineTotal, specifier: "%.2f")")
-                                        .font(.headline)
-                                        .frame(minWidth: 70, alignment: .trailing)
+                                    .font(.headline)
+                                    .foregroundColor(.red)
+                                    .disabled(cart.isEmpty || isCheckingOut)
                                 }
-                                .padding(.vertical, 2)
-                                .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
-                                .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                                    if canApplySaleDiscount {
-                                        Button("Discount") {
-                                            editingDiscountItemID = item.id
-                                            editedItemDiscountText = String(format: "%.2f", item.discountAmount)
-                                        }
-                                        .tint(.orange)
-                                    }
-
-                                    if canChangeSaleItemPrice {
-                                        Button("Price") {
-                                            editingPriceItemID = item.id
-                                            editedUnitPriceText = String(format: "%.2f", item.unitPrice)
-                                        }
-                                        .tint(.blue)
-                                    }
+                                .frame(maxWidth: .infinity)
+                                .background(Color(.systemBackground))
+                            }
+                            .ignoresSafeArea(.keyboard, edges: .bottom)
+                            .sheet(isPresented: $isShowingCheckoutSheet) {
+                                checkoutSheet
+                            }
+                            .onChange(of: paymentMethod) { _, newMethod in
+                                if newMethod == .cash {
+                                    cashCollectedText = String(format: "%.2f", total)
+                                }
+                                if newMethod == .cash || newMethod == .account {
+                                    paymentReferenceText = ""
                                 }
                             }
-                            .onDelete(perform: removeFromCart)
-                        }
-                        .listStyle(.plain)
-                        .listRowSpacing(6)
-                        .contentMargins(.top, 12, for: .scrollContent)
-                    }
-
-                    Divider()
-
-                    VStack {
-                        HStack(spacing: 16) {
-                            Text("Subtotal: $\(subtotal, specifier: "%.2f")")
-                                .font(.subheadline)
-
-                            Text("Total: $\(total, specifier: "%.2f")")
-                                .font(.headline)
-                        }
-
-                        if itemDiscountTotal > 0 {
-                            Text("Item Discounts: -$\(itemDiscountTotal, specifier: "%.2f")")
-                                .font(.subheadline)
-                                .foregroundColor(.secondary)
-                        }
-
-                        if let checkoutError {
-                            Text(checkoutError)
-                                .foregroundColor(.red)
-                                .font(.subheadline)
-                                .multilineTextAlignment(.center)
-                        }
-
-                        if let checkoutMessage {
-                            Text(checkoutMessage)
-                                .foregroundColor(.green)
-                                .font(.subheadline)
-                                .multilineTextAlignment(.center)
-                        }
-
-                        Button {
-                            checkoutError = nil
-                            checkoutMessage = nil
-                            isShowingCheckoutSheet = true
-                        } label: {
-                            if isCheckingOut {
-                                ProgressView()
-                                    .frame(maxWidth: .infinity)
-                            } else {
-                                Text("Checkout")
-                                    .frame(maxWidth: .infinity)
+                            .task {
+                                await loadCustomerAccounts()
                             }
                         }
-                        .buttonStyle(.borderedProminent)
-                        .disabled(cart.isEmpty || isCheckingOut)
                     }
-                    .padding()
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            }
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .principal) {
-                    Text("Make Sale")
-                        .font(.title2.weight(.semibold))
-                }
-            }
-            .contentShape(Rectangle())
-            .onTapGesture {
-                isSearchFieldFocused = false
-            }
-            .alert("Change Item Price", isPresented: isEditingItemPrice) {
-                TextField("Unit price", text: $editedUnitPriceText)
-                    .keyboardType(.decimalPad)
-                Button("Cancel", role: .cancel) {
-                    editingPriceItemID = nil
-                }
-                Button("Save") {
-                    applyEditedPrice()
-                }
-            } message: {
-                Text("Update the unit price for this cart item.")
-            }
-            .alert("Item Discount", isPresented: isEditingItemDiscount) {
-                TextField("Discount amount", text: $editedItemDiscountText)
-                    .keyboardType(.decimalPad)
-                Button("Cancel", role: .cancel) {
-                    editingDiscountItemID = nil
-                }
-                Button("Save") {
-                    applyEditedItemDiscount()
-                }
-            } message: {
-                Text("Apply a discount to this cart line.")
-            }
-            .onDisappear {
-                searchTask?.cancel()
-            }
-            .safeAreaInset(edge: .bottom, spacing: 0) {
-                VStack(spacing: 6) {
-                    Spacer()
-                        .frame(height: 18)
-
-                    Button("Clear Cart") {
-                        clearCart()
-                    }
-                    .font(.headline)
-                    .foregroundColor(.red)
-                    .disabled(cart.isEmpty || isCheckingOut)
-                }
-                .frame(maxWidth: .infinity)
-                .background(Color(.systemBackground))
-            }
-            .ignoresSafeArea(.keyboard, edges: .bottom)
-            .sheet(isPresented: $isShowingCheckoutSheet) {
-                checkoutSheet
-            }
-            .onChange(of: paymentMethod) { _, newMethod in
-                if newMethod == .cash {
-                    cashCollectedText = String(format: "%.2f", total)
-                }
-                if newMethod == .cash || newMethod == .account {
-                    paymentReferenceText = ""
-                }
-            }
-            .task {
-                await loadCustomerAccounts()
-            }
-        }
-    }
 
     var canApplySaleDiscount: Bool {
         sessionManager.currentUser?.canAccess(.applySaleDiscount) == true
