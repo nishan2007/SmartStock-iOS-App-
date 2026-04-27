@@ -71,7 +71,13 @@ struct StoreTransferView: View {
                 }
             }
         }
-        .navigationTitle("Store Transfer")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .principal) {
+                Text("Store Transfer")
+                    .font(.title2.weight(.semibold))
+            }
+        }
         .task {
             await loadIncomingTransfers()
         }

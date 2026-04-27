@@ -103,7 +103,13 @@ struct CustomersView: View {
                 }
             }
         }
-        .navigationTitle("Customers")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .principal) {
+                Text("Customers")
+                    .font(.title2.weight(.semibold))
+            }
+        }
         .listStyle(.insetGrouped)
         .searchable(text: $searchText, prompt: "Search customers")
         .task {

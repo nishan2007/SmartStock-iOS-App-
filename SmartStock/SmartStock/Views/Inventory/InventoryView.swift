@@ -69,8 +69,13 @@ struct InventoryView: View {
                     }
                 }
             }
-            .navigationTitle("Inventory")
+            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                ToolbarItem(placement: .principal) {
+                    Text("Inventory")
+                        .font(.title2.weight(.semibold))
+                }
+
                 ToolbarItemGroup(placement: .topBarTrailing) {
                     Button {
                         isShowingScanner = true

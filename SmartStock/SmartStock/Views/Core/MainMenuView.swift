@@ -195,7 +195,7 @@ struct MainMenuView: View {
             Image("AppLogo")
                 .resizable()
                 .scaledToFit()
-                .frame(width: 118, height: 46, alignment: .leading)
+                .frame(width: 140, height: 56, alignment: .leading)
                 .accessibilityLabel("SmartStock")
 
             Spacer(minLength: 12)
@@ -206,8 +206,8 @@ struct MainMenuView: View {
                 .frame(width: 118, height: 44)
                 .accessibilityLabel("Company logo")
         }
-        .frame(maxWidth: .infinity, minHeight: 48, alignment: .center)
-        .padding(.top, -8)
+        .frame(maxWidth: .infinity, minHeight: 40, alignment: .center)
+        .padding(.top, -20)
         .padding(.horizontal, -4)
     }
 
