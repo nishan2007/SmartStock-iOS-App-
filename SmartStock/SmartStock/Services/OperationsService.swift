@@ -657,6 +657,26 @@ struct OperationsService {
         return rows.reduce(0) { $0 + $1.quantity }
     }
 
+    func fetchTimeClockEntriesForToday(userId: Int) async throws -> [TimeClockEntry] {
+        let calendar = Calendar.current
+        let startOfDay = calendar.startOfDay(for: Date())
+        guard let endOfDay = calendar.date(byAdding: .day, value: 1, to: startOfDay) else {
+            return []
+        }
+        
+        let formatter = ISO8601DateFormatter()
+        
+        return try await client
+            .from("employee_time_clock")
+            .select("clock_id, user_id, user_name, location_id, location_name, work_date, clock_in, lunch_start, lunch_end, clock_out")
+            .eq("user_id", value: userId)
+            .gte("clock_in", value: formatter.string(from: startOfDay))
+            .lt("clock_in", value: formatter.string(from: endOfDay))
+            .order("clock_in", ascending: true)
+            .execute()
+            .value
+    }
+    
     func fetchOpenTimeClockEntry(userId: Int) async throws -> TimeClockEntry? {
         let rows: [TimeClockEntry] = try await client
             .from("employee_time_clock")
@@ -1655,15 +1675,46 @@ struct TimeClockCompensationProfile {
             return nil
         }
     }
+ 
+    // Original current pay period april 16 - april 30, 2026
+ //   var currentPayPeriodText: String? {
+ //       guard let interval = payPeriodRange() else { return nil }
+ //       let formatter = DateFormatter()
+ //       formatter.dateStyle = .medium
+ //       formatter.timeStyle = .none
 
+ //       let endDate = Calendar.current.date(byAdding: .day, value: -1, to: interval.end) ?? interval.end
+ //       return "\(formatter.string(from: interval.start)) - \(formatter.string(from: endDate))"
+ //  }
+   
+    
     var currentPayPeriodText: String? {
         guard let interval = payPeriodRange() else { return nil }
-        let formatter = DateFormatter()
-        formatter.dateStyle = .medium
-        formatter.timeStyle = .none
-
-        let endDate = Calendar.current.date(byAdding: .day, value: -1, to: interval.end) ?? interval.end
-        return "\(formatter.string(from: interval.start)) - \(formatter.string(from: endDate))"
+        
+        let start = interval.start
+        let end = Calendar.current.date(byAdding: .day, value: -1, to: interval.end) ?? interval.end
+        
+        let monthFormatter = DateFormatter()
+        monthFormatter.dateFormat = "MMM"
+        
+        let dayFormatter = DateFormatter()
+        dayFormatter.dateFormat = "d"
+        
+        let yearFormatter = DateFormatter()
+        yearFormatter.dateFormat = "yyyy"
+        
+        let startMonth = monthFormatter.string(from: start)
+        let startDay = dayFormatter.string(from: start)
+        let endDay = dayFormatter.string(from: end)
+        let year = yearFormatter.string(from: end)  // use end date's year
+        
+        if startMonth == monthFormatter.string(from: end) {
+            // Same month → "Apr 16 - 30, 2026"
+            return "\(startMonth) \(startDay) - \(endDay), \(year)"
+        } else {
+            // Different months (rare for semi-monthly) → "Apr 16 - May 15, 2026"
+            return "\(startMonth) \(startDay) - \(monthFormatter.string(from: end)) \(endDay), \(year)"
+        }
     }
 
     func resolvedPayDate(referenceDate: Date = Date(), calendar: Calendar = .current) -> Date? {
