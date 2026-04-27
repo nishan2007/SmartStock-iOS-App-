@@ -394,7 +394,7 @@ struct SelectedDayDetailView: View {
                     VStack(alignment: .trailing, spacing: 4) {
                         Text(String(format: "%.2f hours", roundedHours))
                             .font(.headline)
-                            .foregroundStyle(.green)
+                            .foregroundStyle(.primary)
                         
                         if totalWages > 0 {
                             Text(String(format: "$%.2f", totalWages))

@@ -94,13 +94,19 @@ struct TimeClockView: View {
                         VStack(alignment: .leading, spacing: 8) {
                             Text("Summary")
                                 .font(.headline)
-                            payRow(title: "Type", value: compensationProfile.compensationType.displayName)
-                            if let payPeriod = compensationProfile.payPeriod, !payPeriod.isEmpty {
-                                payRow(title: "Pay Period", value: payPeriod.replacingOccurrences(of: "_", with: " ").capitalized)
-                            }
+                            
+                            
+                            
                             if let currentPayPeriodText = compensationProfile.currentPayPeriodText {
-                                payRow(title: "Current Period", value: currentPayPeriodText)
+                                payRow(title: "Period", value: currentPayPeriodText)
                             }
+                            
+                            if let payPeriod = compensationProfile.payPeriod, !payPeriod.isEmpty {
+                                payRow(title: "Frequency", value: payPeriod.replacingOccurrences(of: "_", with: " ").capitalized)
+                            }
+                            
+                            payRow(title: "Compensation", value: compensationProfile.compensationType.displayName)
+
                             if let rateLabel = compensationProfile.rateLabel, let rateAmount = compensationProfile.rateAmount {
                                 payRow(title: rateLabel, value: currency(rateAmount))
                             }
