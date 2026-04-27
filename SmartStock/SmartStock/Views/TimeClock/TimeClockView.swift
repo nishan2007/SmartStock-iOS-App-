@@ -75,6 +75,8 @@ struct TimeClockView: View {
 
                     if let rateLabel = compensationProfile.rateLabel, let rateAmount = compensationProfile.rateAmount {
                         payRow(title: rateLabel, value: currency(rateAmount))
+                    } else if compensationProfile.compensationType == .hourly {
+                        payRow(title: "Hourly Wage", value: "Not set")
                     }
 
                     if let payDate = compensationProfile.resolvedPayDate() {

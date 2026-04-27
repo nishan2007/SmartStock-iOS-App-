@@ -97,6 +97,15 @@ struct DeviceReceiptSettingsView: View {
             }
             deviceName = updated
             savedDeviceName = updated
+
+            if let deviceId = sessionManager.currentDevice?.id {
+                let updatedDevice = try await DeviceService.shared.updateCurrentDeviceLocalUsername(
+                    deviceId: deviceId,
+                    localUsername: updated
+                )
+                sessionManager.handleTrackedDeviceUpdate(updatedDevice)
+            }
+
             successMessage = "Device receipt name saved."
         } catch {
             errorMessage = error.localizedDescription

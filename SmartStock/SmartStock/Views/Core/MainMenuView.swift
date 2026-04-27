@@ -5,6 +5,7 @@
 //  Created by Nishan Narain on 4/15/26.
 //
 import SwiftUI
+import UIKit
 
 struct MainMenuView: View {
     private enum DashboardTile: String, CaseIterable, Identifiable {
@@ -42,6 +43,7 @@ struct MainMenuView: View {
     @EnvironmentObject var sessionManager: SessionManager
     @AppStorage("mainMenuTileOrder") private var savedTileOrder = ""
     @State private var isShowingCustomizeMenu = false
+    @State private var receiptDeviceName = ""
 
     var user: AppUser? {
         sessionManager.currentUser
@@ -132,6 +134,15 @@ struct MainMenuView: View {
             .toolbar(.hidden, for: .navigationBar)
             .sheet(isPresented: $isShowingCustomizeMenu) {
                 customizeTilesSheet
+            }
+            .task {
+                loadReceiptDeviceName()
+            }
+            .onChange(of: sessionManager.currentDevice?.localUsername) { _, localUsername in
+                receiptDeviceName = localUsername?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                if receiptDeviceName.isEmpty {
+                    loadReceiptDeviceName()
+                }
             }
         }
     }
@@ -451,6 +462,12 @@ struct MainMenuView: View {
             Label("Login Security", systemImage: "lock.shield")
                 .font(.headline)
 
+            LabeledContent("Device", value: loginSecurityDeviceName)
+                .font(.footnote.weight(.medium))
+
+            LabeledContent("Receipt Device", value: loginSecurityReceiptDeviceName)
+                .font(.footnote.weight(.medium))
+
             if sessionManager.canManagePersistentLoginApproval {
                 Text(sessionManager.allowsPersistentLogin
                      ? "This device is approved to stay signed in."
@@ -475,6 +492,32 @@ struct MainMenuView: View {
             RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .stroke(Color.blue.opacity(0.16), lineWidth: 1)
         )
+    }
+
+    private var loginSecurityDeviceName: String {
+        if let deviceName = sessionManager.currentDevice?.deviceName?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !deviceName.isEmpty {
+            return deviceName
+        }
+
+        if let currentDevice = sessionManager.currentDevice {
+            return currentDevice.modelName
+        }
+
+        return UIDevice.current.name
+    }
+
+    private var loginSecurityReceiptDeviceName: String {
+        if let localUsername = sessionManager.currentDevice?.localUsername?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !localUsername.isEmpty {
+            return localUsername
+        }
+
+        return receiptDeviceName.isEmpty ? "Not set" : receiptDeviceName
+    }
+
+    private func loadReceiptDeviceName() {
+        receiptDeviceName = ReceiptNumberManager.shared.currentDeviceId()
     }
 
     private func menuTile(title: String, subtitle: String, systemImage: String, tint: Color) -> some View {
