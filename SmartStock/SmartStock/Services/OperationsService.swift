@@ -1559,7 +1559,13 @@ struct TimeClockCompensationProfile {
         ])
 
         let salaryAmount = TimeClockCompensationProfile.double(in: row, keys: ["salary_amount", "salary", "annual_salary"])
-        let dailyAmount = TimeClockCompensationProfile.double(in: row, keys: ["daily_rate", "day_rate"])
+        let dailyAmount = TimeClockCompensationProfile.double(in: row, keys: [
+            "daily_salary",
+            "daily_rate",
+            "day_rate",
+            "daily_pay",
+            "day_pay"
+        ])
         let hourlyAmount = TimeClockCompensationProfile.double(in: row, keys: [
             "hourly_wage",
             "hourly_rate",
