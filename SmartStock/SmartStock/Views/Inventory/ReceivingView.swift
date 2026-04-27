@@ -17,10 +17,6 @@ struct ReceivingView: View {
     var body: some View {
         VStack(spacing: 0) {
             VStack(spacing: 12) {
-                Text("Receiving")
-                    .font(.largeTitle.bold())
-                    .frame(maxWidth: .infinity, alignment: .leading)
-
                 if availablePages.count > 1 {
                     pageSelector
                 }
@@ -53,8 +49,13 @@ struct ReceivingView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .principal) {
+                Text("Receiving")
+                    .font(.title2.weight(.semibold))
+            }
+        }
         .onAppear(perform: normalizeSelectedPage)
         .onChange(of: sessionManager.currentUser?.mobilePermissions) { _, _ in
             normalizeSelectedPage()

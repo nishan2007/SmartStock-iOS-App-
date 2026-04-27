@@ -24,10 +24,6 @@ struct ViewSalesView: View {
     var body: some View {
         VStack(spacing: 0) {
             VStack(spacing: 12) {
-                Text("Sales")
-                    .font(.largeTitle.bold())
-                    .frame(maxWidth: .infinity, alignment: .leading)
-
                 pageSelector
             }
             .padding(.horizontal)
@@ -49,8 +45,13 @@ struct ViewSalesView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .principal) {
+                Text("Sales")
+                    .font(.title2.weight(.semibold))
+            }
+        }
         .task {
             if selectedPage == .sales {
                 await loadSales()

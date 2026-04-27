@@ -61,8 +61,13 @@ struct ReturnsView: View {
             .padding()
         }
         .background(screenBackground)
-        .navigationTitle("Returns")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .principal) {
+                Text("Returns")
+                    .font(.title2.weight(.semibold))
+            }
+        }
         .sheet(item: $activeScanner) { target in
             BarcodeScannerSheet(
                 scannedCode: binding(for: target),

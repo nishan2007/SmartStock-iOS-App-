@@ -362,8 +362,13 @@ struct MakeSaleView: View {
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
-            .navigationTitle("Make Sale")
             .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .principal) {
+                    Text("Make Sale")
+                        .font(.title2.weight(.semibold))
+                }
+            }
             .contentShape(Rectangle())
             .onTapGesture {
                 isSearchFieldFocused = false
