@@ -1531,12 +1531,17 @@ struct TimeClockCompensationProfile {
         ])
 
         let inferredType: CompensationType
-        switch typeValue?.lowercased() {
-        case "salary", "salaried":
+        let normalizedType = typeValue?
+            .lowercased()
+            .replacingOccurrences(of: "_", with: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        switch normalizedType {
+        case "salary", "salaried", "salary employee", "salaried employee":
             inferredType = .salary
-        case "daily", "day", "day_rate":
+        case "daily", "day", "day rate", "daily employee":
             inferredType = .daily
-        case "hourly", "hour", "hour_rate":
+        case "hourly", "hour", "hour rate", "hourly employee":
             inferredType = .hourly
         default:
             if TimeClockCompensationProfile.bool(in: row, keys: ["is_salary"]) == true {
@@ -1555,7 +1560,14 @@ struct TimeClockCompensationProfile {
 
         let salaryAmount = TimeClockCompensationProfile.double(in: row, keys: ["salary_amount", "salary", "annual_salary"])
         let dailyAmount = TimeClockCompensationProfile.double(in: row, keys: ["daily_rate", "day_rate"])
-        let hourlyAmount = TimeClockCompensationProfile.double(in: row, keys: ["hourly_rate", "hour_rate", "wage"])
+        let hourlyAmount = TimeClockCompensationProfile.double(in: row, keys: [
+            "hourly_wage",
+            "hourly_rate",
+            "hour_rate",
+            "hourly_pay",
+            "wage",
+            "wage_rate"
+        ])
         let genericRate = TimeClockCompensationProfile.double(in: row, keys: ["pay_rate", "rate"])
 
         let resolvedAmount: Double?
