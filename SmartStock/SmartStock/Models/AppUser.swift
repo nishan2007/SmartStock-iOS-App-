@@ -63,4 +63,8 @@ struct AppUser: Decodable, Identifiable {
     func canAccess(_ permission: MobilePermission) -> Bool {
         mobilePermissions.contains(permission)
     }
+
+    var canManageEmployees: Bool {
+        canAccess(.employees)
+    }
 }

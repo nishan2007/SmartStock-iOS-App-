@@ -18,37 +18,71 @@ struct EmployeeFormFields: View {
 
     var body: some View {
         Section("Basic Info") {
-            TextField("Full Name", text: $viewModel.fullName)
+            requiredField(.firstName, isEmpty: isBlank(viewModel.firstName)) {
+                TextField("First Name", text: $viewModel.firstName)
+                    .textInputAutocapitalization(.words)
+            }
+
+            TextField("Middle Name (optional)", text: $viewModel.middleName)
                 .textInputAutocapitalization(.words)
 
-            TextField("Username", text: $viewModel.username)
+            requiredField(.lastName, isEmpty: isBlank(viewModel.lastName)) {
+                TextField("Last Name", text: $viewModel.lastName)
+                    .textInputAutocapitalization(.words)
+            }
+
+            TextField("Username (auto-generated)", text: $viewModel.username)
                 .autocorrectionDisabled()
 
-            TextField("Email", text: $viewModel.email)
-                .keyboardType(.emailAddress)
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
+            requiredField(.email, isEmpty: isBlank(viewModel.email)) {
+                TextField("Email", text: $viewModel.email)
+                    .keyboardType(.emailAddress)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+            }
 
-            TextField("Phone", text: $viewModel.phone)
-                .keyboardType(.phonePad)
+            requiredField(.phone, isEmpty: isBlank(viewModel.phone)) {
+                TextField("Phone", text: $viewModel.phone)
+                    .keyboardType(.phonePad)
+            }
+
+            TextField("Badge ID (auto-generated)", text: $viewModel.badgeId)
+                .textInputAutocapitalization(.characters)
+                .autocorrectionDisabled()
+        }
+
+        Section("Compensation") {
+            requiredField(.compensationType, isEmpty: isBlank(viewModel.compensationType)) {
+                TextField("Compensation Type", text: $viewModel.compensationType)
+                    .textInputAutocapitalization(.words)
+            }
+
+            requiredField(.salary, isEmpty: isBlank(viewModel.salaryText)) {
+                TextField("Salary", text: $viewModel.salaryText)
+                    .keyboardType(.decimalPad)
+            }
         }
 
         if showPasswordField {
             Section(viewModel.isEditing ? "Change Password (Optional)" : "Password") {
-                SecureField(
-                    viewModel.isEditing ? "Leave blank to keep current password" : "Password",
-                    text: $viewModel.password
-                )
+                requiredField(.password, isEmpty: isBlank(viewModel.password)) {
+                    SecureField(
+                        viewModel.isEditing ? "Leave blank to keep current password" : "Password",
+                        text: $viewModel.password
+                    )
+                }
             }
         }
 
         Section("Role") {
-            Picker("Role", selection: Binding(
-                get: { viewModel.selectedRoleId ?? 0 },
-                set: { viewModel.selectedRoleId = $0 }
-            )) {
-                ForEach(viewModel.roles) { role in
-                    Text(role.name).tag(role.id)
+            requiredField(.role, isEmpty: viewModel.selectedRoleId == nil) {
+                Picker("Role", selection: Binding(
+                    get: { viewModel.selectedRoleId ?? 0 },
+                    set: { viewModel.selectedRoleId = $0 }
+                )) {
+                    ForEach(viewModel.roles) { role in
+                        Text(role.name).tag(role.id)
+                    }
                 }
             }
         }
@@ -91,5 +125,37 @@ struct EmployeeFormFields: View {
                 }
             }
         }
+    }
+
+    private func isMissing(_ field: EmployeeFormRequiredField, isEmpty: Bool) -> Bool {
+        viewModel.missingRequiredFields.contains(field) && isEmpty
+    }
+
+    private func isBlank(_ value: String) -> Bool {
+        value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    @ViewBuilder
+    private func requiredField<Content: View>(
+        _ field: EmployeeFormRequiredField,
+        isEmpty: Bool,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        let missing = isMissing(field, isEmpty: isEmpty)
+
+        content()
+            .padding(missing ? 8 : 0)
+            .background {
+                if missing {
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .fill(Color.red.opacity(0.08))
+                }
+            }
+            .overlay {
+                if missing {
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .stroke(Color.red, lineWidth: 1)
+                }
+            }
     }
 }

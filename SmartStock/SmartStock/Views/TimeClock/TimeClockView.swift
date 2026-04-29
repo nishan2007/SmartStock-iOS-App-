@@ -13,6 +13,7 @@ struct TimeClockView: View {
     @State private var todaysEntries: [TimeClockEntry] = []
     @State private var compensationProfile: TimeClockCompensationProfile?
     @State private var hoursWorkedThisPeriod: Double?
+    @State private var workedDaysThisPeriod: Int?
     @State private var notes = ""
     @State private var isLoading = true
     @State private var isSubmitting = false
@@ -110,7 +111,7 @@ struct TimeClockView: View {
                                         statusRow(title: "Clocked Out", date: clockOut)
                                     }
                                     payRow(title: "Session Hours", value: String(format: "%.2f hours", entry.workedHours()))
-                                    if let earned = entry.totalEarned ?? compensationProfile?.earned(forSessionHours: entry.workedHours()) {
+                                    if let earned = displayedEarned(for: entry) {
                                         payRow(title: "Session Earned", value: currency(earned))
                                     }
                                 }
@@ -147,6 +148,14 @@ struct TimeClockView: View {
                                     payRow(title: "Total Hours", value: String(format: "%.2f hours", hoursWorkedThisPeriod))
                                 } else {
                                     payRow(title: "Total Hours", value: "Unavailable")
+                                }
+                            }
+
+                            if compensationProfile.compensationType == .daily {
+                                if let workedDaysThisPeriod {
+                                    payRow(title: "Worked Days", value: "\(workedDaysThisPeriod)")
+                                } else {
+                                    payRow(title: "Worked Days", value: "Unavailable")
                                 }
                             }
                           
@@ -296,17 +305,12 @@ struct TimeClockView: View {
             return (rawPay * 100).rounded() / 100
             
         case .daily:
-            guard let interval = profile.payPeriodRange() else { return nil }
-            let days = Calendar.current.dateComponents([.day], from: interval.start, to: interval.end).day ?? 0
-            let rawPay = rate * Double(days)
+            guard let workedDaysThisPeriod else { return nil }
+            let rawPay = rate * Double(workedDaysThisPeriod)
             return (rawPay * 100).rounded() / 100
             
         case .salary:
-            guard let interval = profile.payPeriodRange() else { return nil }
-            let daysInPeriod = Calendar.current.dateComponents([.day], from: interval.start, to: interval.end).day ?? 0
-            let dailyRate = rate / 365.0
-            let rawPay = dailyRate * Double(daysInPeriod)
-            return (rawPay * 100).rounded() / 100
+            return (rate * 100).rounded() / 100
             
         default:
             return nil
@@ -340,6 +344,7 @@ struct TimeClockView: View {
             todaysEntries = try await service.fetchTimeClockEntriesForToday(userId: user.id)
             compensationProfile = try await service.fetchTimeClockCompensationProfile(userId: user.id)
             hoursWorkedThisPeriod = try await loadHoursWorkedThisPeriod(for: user.id, profile: compensationProfile)
+            workedDaysThisPeriod = try await loadWorkedDaysThisPeriod(for: user.id, profile: compensationProfile)
             
             await checkAndAutoEndStaleLunch()
         } catch {
@@ -365,6 +370,7 @@ struct TimeClockView: View {
                 todaysEntries = try await service.fetchTimeClockEntriesForToday(userId: userId)
                 activeEntry = try await service.fetchOpenTimeClockEntry(userId: userId)
                 hoursWorkedThisPeriod = try await loadHoursWorkedThisPeriod(for: userId, profile: compensationProfile)
+                workedDaysThisPeriod = try await loadWorkedDaysThisPeriod(for: userId, profile: compensationProfile)
             }
         } catch {}
     }
@@ -415,6 +421,7 @@ struct TimeClockView: View {
                 todaysEntries = try await service.fetchTimeClockEntriesForToday(userId: userId)
                 activeEntry = try await service.fetchOpenTimeClockEntry(userId: userId)
                 hoursWorkedThisPeriod = try await loadHoursWorkedThisPeriod(for: userId, profile: compensationProfile)
+                workedDaysThisPeriod = try await loadWorkedDaysThisPeriod(for: userId, profile: compensationProfile)
             }
         } catch {
             errorMessage = error.localizedDescription
@@ -428,7 +435,11 @@ struct TimeClockView: View {
         defer { isSubmitting = false }
         
         do {
-            _ = try await service.clockOut(entry: entry, compensationProfile: compensationProfile)
+            _ = try await service.clockOut(
+                entry: entry,
+                compensationProfile: compensationProfile,
+                shouldPayDailyRateForDay: shouldPayDailyRate(for: entry)
+            )
             self.activeEntry = nil
             successMessage = "Clocked out successfully."
             
@@ -437,6 +448,7 @@ struct TimeClockView: View {
                 todaysEntries = try await service.fetchTimeClockEntriesForToday(userId: userId)
                 activeEntry = try await service.fetchOpenTimeClockEntry(userId: userId)
                 hoursWorkedThisPeriod = try await loadHoursWorkedThisPeriod(for: userId, profile: compensationProfile)
+                workedDaysThisPeriod = try await loadWorkedDaysThisPeriod(for: userId, profile: compensationProfile)
             }
         } catch {
             errorMessage = error.localizedDescription
@@ -496,6 +508,23 @@ struct TimeClockView: View {
     private func currency(_ value: Double) -> String {
         String(format: "$%.2f", value)
     }
+
+    private func displayedEarned(for entry: TimeClockEntry) -> Double? {
+        guard compensationProfile?.compensationType != .salary,
+              compensationProfile?.compensationType != .daily else { return nil }
+        return entry.totalEarned ?? compensationProfile?.earned(forSessionHours: entry.workedHours())
+    }
+
+    private func shouldPayDailyRate(for entry: TimeClockEntry) -> Bool {
+        guard compensationProfile?.compensationType == .daily else { return true }
+
+        return !todaysEntries.contains { otherEntry in
+            otherEntry.clockId != entry.clockId
+                && otherEntry.clockOut != nil
+                && Calendar.current.isDate(otherEntry.clockIn, inSameDayAs: entry.clockIn)
+                && otherEntry.workedHours() > 0
+        }
+    }
     
     private func loadHoursWorkedThisPeriod(for userId: Int, profile: TimeClockCompensationProfile?) async throws -> Double? {
         guard let profile,
@@ -504,6 +533,15 @@ struct TimeClockView: View {
             return nil
         }
         return try await service.fetchWorkedHours(userId: userId, from: interval.start, to: interval.end)
+    }
+
+    private func loadWorkedDaysThisPeriod(for userId: Int, profile: TimeClockCompensationProfile?) async throws -> Int? {
+        guard let profile,
+              profile.compensationType == .daily,
+              let interval = profile.payPeriodRange() else {
+            return nil
+        }
+        return try await service.fetchWorkedDays(userId: userId, from: interval.start, to: interval.end)
     }
 }
 

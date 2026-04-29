@@ -152,7 +152,7 @@ struct MainMenuView: View {
     }
 
     private var canAccessAdminHub: Bool {
-        canAccess(.employees)
+        user?.canManageEmployees == true
             || canAccess(.rolePermissions)
             || canAccess(.deviceManagement)
             || canAccess(.localDeviceSettings)

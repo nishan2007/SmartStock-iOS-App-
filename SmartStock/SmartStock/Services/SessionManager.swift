@@ -112,7 +112,7 @@ final class SessionManager: ObservableObject {
             let password = password.trimmingCharacters(in: .whitespacesAndNewlines)
 
             guard !usernameOrEmail.isEmpty, !password.isEmpty else {
-                errorMessage = "Enter username/email and password."
+                errorMessage = "Enter username, email, or badge ID and password."
                 return false
             }
 
@@ -122,7 +122,7 @@ final class SessionManager: ObservableObject {
                 // Email login can go directly through Supabase Auth and load the profile afterward.
                 email = usernameOrEmail
             } else {
-                // Username login needs a pre-auth username -> email lookup. This only works if the
+                // Username or badge login needs a pre-auth identifier -> email lookup. This only works if the
                 // database exposes a narrow lookup policy/RPC/function for unauthenticated clients.
                 let results = try await lookupLoginUser(usernameOrEmail)
 

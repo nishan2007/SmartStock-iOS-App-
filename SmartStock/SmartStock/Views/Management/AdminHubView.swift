@@ -47,7 +47,7 @@ struct AdminHubView: View {
 
     private var peopleItems: [AdminHubItem] {
         [
-            canAccess(.employees) ? AdminHubItem(
+            sessionManager.currentUser?.canManageEmployees == true ? AdminHubItem(
                 title: "Employees",
                 subtitle: "Employee records and store access",
                 systemImage: "person.3.fill",

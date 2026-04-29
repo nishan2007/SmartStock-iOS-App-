@@ -27,6 +27,18 @@ struct EmployeeDetailView: View {
         List {
             Section("Employee") {
                 detailRow("Full Name", employee.fullName)
+                if let firstName = employee.firstName, !firstName.isEmpty {
+                    detailRow("First Name", firstName)
+                }
+
+                if let middleName = employee.middleName, !middleName.isEmpty {
+                    detailRow("Middle Name", middleName)
+                }
+
+                if let lastName = employee.lastName, !lastName.isEmpty {
+                    detailRow("Last Name", lastName)
+                }
+
                 detailRow("Username", employee.username)
                 detailRow("Role", employee.roleName)
                 detailRow("Status", employee.isActive ? "Active" : "Inactive")
@@ -39,8 +51,31 @@ struct EmployeeDetailView: View {
                     detailRow("Phone", phone)
                 }
 
+                if let badgeId = employee.badgeId, !badgeId.isEmpty {
+                    detailRow("Badge ID", badgeId)
+                }
+
+                if let authUserId = employee.authUserId, !authUserId.isEmpty {
+                    detailRow("Auth User ID", authUserId)
+                }
+
                 if let createdAt = employee.createdAt {
                     detailRow("Created", createdAt.formatted(date: .abbreviated, time: .shortened))
+                }
+            }
+
+            Section("Compensation") {
+                if let compensationType = employee.compensationType, !compensationType.isEmpty {
+                    detailRow("Type", compensationType)
+                }
+
+                if let salary = employee.salary {
+                    detailRow("Salary", NSDecimalNumber(decimal: salary).stringValue)
+                }
+
+                if employee.compensationType?.isEmpty != false && employee.salary == nil {
+                    Text("No compensation details")
+                        .foregroundColor(.secondary)
                 }
             }
 

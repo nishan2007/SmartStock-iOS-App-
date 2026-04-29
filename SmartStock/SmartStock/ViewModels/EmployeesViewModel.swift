@@ -65,9 +65,14 @@ final class EmployeesViewModel: ObservableObject {
 
         return employees.filter { employee in
             employee.fullName.lowercased().contains(query) ||
+            (employee.firstName?.lowercased().contains(query) ?? false) ||
+            (employee.middleName?.lowercased().contains(query) ?? false) ||
+            (employee.lastName?.lowercased().contains(query) ?? false) ||
             employee.username.lowercased().contains(query) ||
             employee.roleName.lowercased().contains(query) ||
-            (employee.email?.lowercased().contains(query) ?? false)
+            (employee.email?.lowercased().contains(query) ?? false) ||
+            (employee.phone?.lowercased().contains(query) ?? false) ||
+            (employee.badgeId?.lowercased().contains(query) ?? false)
         }
     }
 }

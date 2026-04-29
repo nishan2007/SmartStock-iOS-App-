@@ -721,10 +721,17 @@ struct OperationsService {
         return entry
     }
 
-    func clockOut(entry: TimeClockEntry, compensationProfile: TimeClockCompensationProfile?) async throws -> TimeClockEntry {
+    func clockOut(
+        entry: TimeClockEntry,
+        compensationProfile: TimeClockCompensationProfile?,
+        shouldPayDailyRateForDay: Bool = true
+    ) async throws -> TimeClockEntry {
         let clockOutDate = Date()
         let totalHours = entry.roundedWorkedHours(until: clockOutDate)
-        let totalEarned = compensationProfile?.earned(forSessionHours: totalHours)
+        let totalEarned = compensationProfile?.earned(
+            forSessionHours: totalHours,
+            shouldPayDailyRateForDay: shouldPayDailyRateForDay
+        )
 
         let entry: TimeClockEntry = try await client
             .from("employee_time_clock")
@@ -895,6 +902,26 @@ struct OperationsService {
         return rows.reduce(0) { partial, entry in
             partial + entry.workedHours(until: Date())
         }
+    }
+
+    func fetchWorkedDays(userId: Int, from start: Date, to end: Date) async throws -> Int {
+        let formatter = ISO8601DateFormatter()
+        let rows: [TimeClockEntry] = try await client
+            .from("employee_time_clock")
+            .select(timeClockEntrySelection)
+            .eq("user_id", value: userId)
+            .gte("clock_in", value: formatter.string(from: start))
+            .lt("clock_in", value: formatter.string(from: end))
+            .order("clock_in", ascending: true)
+            .execute()
+            .value
+
+        let workedDays = rows.reduce(into: Set<Date>()) { result, entry in
+            guard entry.workedHours(until: Date()) > 0 else { return }
+            result.insert(Calendar.current.startOfDay(for: entry.clockIn))
+        }
+
+        return workedDays.count
     }
 
     private func fetchInventoryRecord(productId: Int, locationId: Int) async throws -> InventoryRecord? {
@@ -1713,7 +1740,7 @@ struct TimeClockCompensationProfile {
         }
     }
 
-    func earned(forSessionHours hours: Double) -> Double? {
+    func earned(forSessionHours hours: Double, shouldPayDailyRateForDay: Bool = true) -> Double? {
         guard let rateAmount, hours > 0 else { return nil }
 
         let earned: Double
@@ -1721,9 +1748,10 @@ struct TimeClockCompensationProfile {
         case .hourly:
             earned = rateAmount * hours
         case .daily:
+            guard shouldPayDailyRateForDay else { return nil }
             earned = rateAmount
         case .salary:
-            earned = (rateAmount / 2080.0) * hours
+            return nil
         case .unknown:
             return nil
         }

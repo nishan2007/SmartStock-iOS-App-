@@ -46,11 +46,17 @@ struct EmployeeRowView: View {
                     .foregroundColor(.secondary)
             }
 
-            if let email = employee.email, !email.isEmpty {
-                Text(email)
-                    .font(.caption)
-                    .foregroundColor(.secondary)
+            HStack(spacing: 12) {
+                if let email = employee.email, !email.isEmpty {
+                    Label(email, systemImage: "envelope")
+                }
+
+                if let badgeId = employee.badgeId, !badgeId.isEmpty {
+                    Label(badgeId, systemImage: "number")
+                }
             }
+            .font(.caption)
+            .foregroundColor(.secondary)
         }
         .padding(.vertical, 6)
     }

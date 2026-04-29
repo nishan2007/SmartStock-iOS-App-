@@ -26,7 +26,7 @@ struct LoginView: View {
                     .foregroundColor(.secondary)
 
                 VStack(spacing: 14) {
-                    TextField("Username", text: $username)
+                    TextField("Username, email, or badge ID", text: $username)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                         .keyboardType(.emailAddress)
