@@ -25,8 +25,11 @@ enum MobilePermission: String, CaseIterable, Identifiable, Codable, Hashable {
     case inventory = "inventory"
     case localDeviceSettings = "device_receipt_settings"
     case locationManagement = "location_management"
+    case machineManagement = "machine_management"
+    case maintenanceManagement = "maintenance_management"
     case manageCustomers = "manage_customers"
     case payrollDashboard = "payroll_dashboard"
+    case partsManagement = "parts_management"
     case receiving = "receiving"
     case returns = "returns"
     case rolePermissions = "role_permissions"
@@ -85,10 +88,16 @@ enum MobilePermission: String, CaseIterable, Identifiable, Codable, Hashable {
             return "Local Device Settings"
         case .locationManagement:
             return "Location Management"
+        case .machineManagement:
+            return "Machine Management"
+        case .maintenanceManagement:
+            return "Maintenance Management"
         case .manageCustomers:
             return "Manage Customers"
         case .payrollDashboard:
             return "Payroll Dashboard"
+        case .partsManagement:
+            return "Parts Management"
         case .receiving:
             return "Receiving Inventory"
         case .returns:
@@ -126,7 +135,7 @@ enum MobilePermission: String, CaseIterable, Identifiable, Codable, Hashable {
         switch self {
         case .makeSale, .viewSales, .returns, .endOfDay, .customers, .manageCustomers, .editCustomerCreditLimit, .editAccountNumber, .applySaleDiscount, .changeSaleItemPrice:
             return "Sales"
-        case .inventory, .receiving, .storeTransfer, .verifyStoreTransferQuantity, .editItem, .addNewItem, .adjustInventoryQuantity, .viewCostPrice, .viewAllStoresInventory, .viewItemDetails, .viewCreatedBy, .departmentManagement, .vendorManagement, .viewVendor, .viewReceivingHistory:
+        case .inventory, .receiving, .storeTransfer, .verifyStoreTransferQuantity, .editItem, .addNewItem, .adjustInventoryQuantity, .viewCostPrice, .viewAllStoresInventory, .viewItemDetails, .viewCreatedBy, .departmentManagement, .vendorManagement, .viewVendor, .viewReceivingHistory, .maintenanceManagement, .machineManagement, .partsManagement:
             return "Inventory"
         case .timeClock:
             return "Employee"

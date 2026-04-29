@@ -85,6 +85,9 @@ values
   ,('view_receiving_history', 'View Receiving History', 'Inventory', 118)
   ,('view_reports', 'View Reports', 'Admin', 335)
   ,('view_vendor', 'View Vendor', 'Inventory', 119)
+  ,('maintenance_management', 'Maintenance Management', 'Inventory', 160)
+  ,('machine_management', 'Machine Management', 'Inventory', 170)
+  ,('parts_management', 'Parts Management', 'Inventory', 180)
 on conflict (permission_key) do update
 set
   display_name = excluded.display_name,

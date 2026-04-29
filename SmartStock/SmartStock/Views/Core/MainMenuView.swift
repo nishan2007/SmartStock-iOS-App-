@@ -15,6 +15,7 @@ struct MainMenuView: View {
         case endOfDay
         case sales
         case inventory
+        case maintenance
         case receiving
         case storeTransfer
         case changeStore
@@ -32,6 +33,7 @@ struct MainMenuView: View {
             .timeClock,
             .sales,
             .inventory,
+            .maintenance,
             .receiving,
             .storeTransfer,
             .changeStore,
@@ -160,6 +162,8 @@ struct MainMenuView: View {
             || canAccess(.departmentManagement)
             || canAccess(.vendorManagement)
             || canAccess(.viewVendor)
+            || canAccess(.machineManagement)
+            || canAccess(.partsManagement)
     }
 
     private var receivingSubtitle: String {
@@ -237,6 +241,9 @@ struct MainMenuView: View {
             ViewSalesView()
         case .inventory:
             InventoryView()
+        case .maintenance:
+            MaintenanceView()
+                .environmentObject(sessionManager)
         case .receiving:
             ReceivingView()
         case .storeTransfer:
@@ -269,6 +276,8 @@ struct MainMenuView: View {
             return canAccess(.viewSales)
         case .inventory:
             return canAccess(.inventory)
+        case .maintenance:
+            return canAccess(.maintenanceManagement)
         case .receiving:
             return canAccess(.receiving) || canAccess(.viewReceivingHistory)
         case .storeTransfer:
@@ -298,6 +307,8 @@ struct MainMenuView: View {
             return "Sales"
         case .inventory:
             return "Inventory"
+        case .maintenance:
+            return "Maintenance"
         case .receiving:
             return "Receiving"
         case .storeTransfer:
@@ -327,6 +338,8 @@ struct MainMenuView: View {
             return "Sales and return history"
         case .inventory:
             return "Stock and pricing"
+        case .maintenance:
+            return "Machines, parts, and tickets"
         case .receiving:
             return receivingSubtitle
         case .storeTransfer:
@@ -356,6 +369,8 @@ struct MainMenuView: View {
             return "chart.line.uptrend.xyaxis"
         case .inventory:
             return "shippingbox.fill"
+        case .maintenance:
+            return "wrench.and.screwdriver.fill"
         case .receiving:
             return "tray.and.arrow.down.fill"
         case .storeTransfer:
@@ -385,6 +400,8 @@ struct MainMenuView: View {
             return .blue
         case .inventory:
             return .orange
+        case .maintenance:
+            return .mint
         case .receiving:
             return .cyan
         case .storeTransfer:

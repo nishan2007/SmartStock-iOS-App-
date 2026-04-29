@@ -86,6 +86,20 @@ struct AdminHubView: View {
                 systemImage: "building.2.fill",
                 tint: .brown,
                 destination: AnyView(VendorManagementView().environmentObject(sessionManager))
+            ) : nil,
+            canAccess(.machineManagement) ? AdminHubItem(
+                title: "Machines",
+                subtitle: "Maintenance equipment and parts links",
+                systemImage: "wrench.and.screwdriver.fill",
+                tint: .mint,
+                destination: AnyView(AdminMachinesView().environmentObject(sessionManager))
+            ) : nil,
+            canAccess(.partsManagement) ? AdminHubItem(
+                title: "Parts",
+                subtitle: "Maintenance inventory and storage",
+                systemImage: "gearshape.2.fill",
+                tint: .orange,
+                destination: AnyView(AdminPartsView().environmentObject(sessionManager))
             ) : nil
         ].compactMap { $0 }
     }
