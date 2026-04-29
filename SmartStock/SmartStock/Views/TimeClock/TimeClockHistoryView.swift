@@ -316,6 +316,10 @@ struct SessionCard: View {
             } else {
                 DetailRow(title: "Clocked Out", value: "Still Open")
             }
+            DetailRow(title: "Total Hours", value: String(format: "%.2f hours", entry.workedHours()))
+            if let earned = entry.totalEarned ?? compensationProfile?.earned(forSessionHours: entry.workedHours()) {
+                DetailRow(title: "Total Earned", value: String(format: "$%.2f", earned))
+            }
         }
         .padding(.vertical, 10)      // reduced vertical padding
         .padding(.horizontal)
@@ -359,11 +363,9 @@ struct SelectedDayDetailView: View {
     }
     
     private var totalWages: Double {
-        guard let rate = compensationProfile?.rateAmount,
-              compensationProfile?.compensationType == .hourly else {
-            return 0
+        dayEntries.reduce(0) { partial, entry in
+            partial + (entry.totalEarned ?? compensationProfile?.earned(forSessionHours: entry.workedHours()) ?? 0)
         }
-        return roundedHours * rate
     }
     
     var body: some View {

@@ -109,6 +109,10 @@ struct TimeClockView: View {
                                     if let clockOut = entry.clockOut {
                                         statusRow(title: "Clocked Out", date: clockOut)
                                     }
+                                    payRow(title: "Session Hours", value: String(format: "%.2f hours", entry.workedHours()))
+                                    if let earned = entry.totalEarned ?? compensationProfile?.earned(forSessionHours: entry.workedHours()) {
+                                        payRow(title: "Session Earned", value: currency(earned))
+                                    }
                                 }
                             }
                         }
@@ -224,8 +228,8 @@ struct TimeClockView: View {
             } message: {
                 VStack(spacing: 8) {
                     Text("This will end your current shift.")
-                    if let hours = hoursWorkedThisPeriod {
-                        Text(String(format: "Total hours today: %.2f", hours))
+                    if let activeEntry {
+                        Text(String(format: "Session hours: %.2f", activeEntry.roundedWorkedHours()))
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
                     }
@@ -418,13 +422,13 @@ struct TimeClockView: View {
     }
     
     private func performClockOut() async {
-        guard let user = sessionManager.currentUser, let entry = activeEntry else { return }
+        guard sessionManager.currentUser != nil, let entry = activeEntry else { return }
         
         isSubmitting = true
         defer { isSubmitting = false }
         
         do {
-            _ = try await service.clockOut(entryId: entry.clockId)
+            _ = try await service.clockOut(entry: entry, compensationProfile: compensationProfile)
             self.activeEntry = nil
             successMessage = "Clocked out successfully."
             

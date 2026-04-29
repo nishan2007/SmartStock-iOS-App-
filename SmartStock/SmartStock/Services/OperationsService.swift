@@ -9,6 +9,7 @@ import Supabase
 struct OperationsService {
     private let client = supabase
     private let inventoryService = InventoryService()
+    private let timeClockEntrySelection = "clock_id, user_id, user_name, location_id, location_name, work_date, clock_in, lunch_start, lunch_end, clock_out, total_hours_worked, total_earned"
 
     func fetchProduct(forBarcode barcode: String) async throws -> ScannedProduct? {
         guard let productId = try await inventoryService.productId(forBarcode: barcode) else {
@@ -668,7 +669,7 @@ struct OperationsService {
         
         return try await client
             .from("employee_time_clock")
-            .select("clock_id, user_id, user_name, location_id, location_name, work_date, clock_in, lunch_start, lunch_end, clock_out")
+            .select(timeClockEntrySelection)
             .eq("user_id", value: userId)
             .gte("clock_in", value: formatter.string(from: startOfDay))
             .lt("clock_in", value: formatter.string(from: endOfDay))
@@ -680,7 +681,7 @@ struct OperationsService {
     func fetchOpenTimeClockEntry(userId: Int) async throws -> TimeClockEntry? {
         let rows: [TimeClockEntry] = try await client
             .from("employee_time_clock")
-            .select("clock_id, user_id, user_name, location_id, location_name, work_date, clock_in, lunch_start, lunch_end, clock_out")
+            .select(timeClockEntrySelection)
             .eq("user_id", value: userId)
             .is("clock_out", value: nil)
             .order("clock_in", ascending: false)
@@ -694,7 +695,7 @@ struct OperationsService {
     func fetchTimeClockHistory(userId: Int) async throws -> [TimeClockEntry] {
         try await client
             .from("employee_time_clock")
-            .select("clock_id, user_id, user_name, location_id, location_name, work_date, clock_in, lunch_start, lunch_end, clock_out")
+            .select(timeClockEntrySelection)
             .eq("user_id", value: userId)
             .order("clock_in", ascending: false)
             .execute()
@@ -712,7 +713,7 @@ struct OperationsService {
                     location_name: store?.name
                 )
             )
-            .select("clock_id, user_id, user_name, location_id, location_name, work_date, clock_in, lunch_start, lunch_end, clock_out")
+            .select(timeClockEntrySelection)
             .single()
             .execute()
             .value
@@ -720,12 +721,22 @@ struct OperationsService {
         return entry
     }
 
-    func clockOut(entryId: Int64) async throws -> TimeClockEntry {
+    func clockOut(entry: TimeClockEntry, compensationProfile: TimeClockCompensationProfile?) async throws -> TimeClockEntry {
+        let clockOutDate = Date()
+        let totalHours = entry.roundedWorkedHours(until: clockOutDate)
+        let totalEarned = compensationProfile?.earned(forSessionHours: totalHours)
+
         let entry: TimeClockEntry = try await client
             .from("employee_time_clock")
-            .update(TimeClockOutUpdate(clock_out: ISO8601DateFormatter().string(from: Date())))
-            .eq("clock_id", value: Int(entryId))
-            .select("clock_id, user_id, user_name, location_id, location_name, work_date, clock_in, lunch_start, lunch_end, clock_out")
+            .update(
+                TimeClockOutUpdate(
+                    clock_out: ISO8601DateFormatter().string(from: clockOutDate),
+                    total_hours_worked: totalHours,
+                    total_earned: totalEarned
+                )
+            )
+            .eq("clock_id", value: Int(entry.clockId))
+            .select(timeClockEntrySelection)
             .single()
             .execute()
             .value
@@ -738,7 +749,7 @@ struct OperationsService {
             .from("employee_time_clock")
             .update(TimeClockLunchStartUpdate(lunch_start: ISO8601DateFormatter().string(from: Date())))
             .eq("clock_id", value: Int(entryId))
-            .select("clock_id, user_id, user_name, location_id, location_name, work_date, clock_in, lunch_start, lunch_end, clock_out")
+            .select(timeClockEntrySelection)
             .single()
             .execute()
             .value
@@ -751,7 +762,7 @@ struct OperationsService {
             .from("employee_time_clock")
             .update(TimeClockLunchEndUpdate(lunch_end: ISO8601DateFormatter().string(from: Date())))
             .eq("clock_id", value: Int(entryId))
-            .select("clock_id, user_id, user_name, location_id, location_name, work_date, clock_in, lunch_start, lunch_end, clock_out")
+            .select(timeClockEntrySelection)
             .single()
             .execute()
             .value
@@ -873,7 +884,7 @@ struct OperationsService {
         let formatter = ISO8601DateFormatter()
         let rows: [TimeClockEntry] = try await client
             .from("employee_time_clock")
-            .select("clock_id, user_id, user_name, location_id, location_name, work_date, clock_in, lunch_start, lunch_end, clock_out")
+            .select(timeClockEntrySelection)
             .eq("user_id", value: userId)
             .gte("clock_in", value: formatter.string(from: start))
             .lt("clock_in", value: formatter.string(from: end))
@@ -1399,6 +1410,8 @@ struct TimeClockEntry: Decodable {
     let lunchStart: Date?
     let lunchEnd: Date?
     let clockOut: Date?
+    let totalHoursWorked: Double?
+    let totalEarned: Double?
 
     var isOpen: Bool {
         clockOut == nil
@@ -1409,6 +1422,18 @@ struct TimeClockEntry: Decodable {
     }
 
     func workedHours(until now: Date = Date()) -> Double {
+        if clockOut != nil, let totalHoursWorked {
+            return totalHoursWorked
+        }
+
+        return calculatedWorkedHours(until: now)
+    }
+
+    func roundedWorkedHours(until now: Date = Date()) -> Double {
+        (calculatedWorkedHours(until: now) * 100).rounded() / 100
+    }
+
+    private func calculatedWorkedHours(until now: Date) -> Double {
         let shiftEnd = clockOut ?? now
         guard shiftEnd > clockIn else { return 0 }
 
@@ -1435,6 +1460,8 @@ struct TimeClockEntry: Decodable {
         case lunchStart = "lunch_start"
         case lunchEnd = "lunch_end"
         case clockOut = "clock_out"
+        case totalHoursWorked = "total_hours_worked"
+        case totalEarned = "total_earned"
     }
 
     init(from decoder: Decoder) throws {
@@ -1449,6 +1476,8 @@ struct TimeClockEntry: Decodable {
         lunchStart = try Self.decodeOptionalDate(for: .lunchStart, in: container)
         lunchEnd = try Self.decodeOptionalDate(for: .lunchEnd, in: container)
         clockOut = try Self.decodeOptionalDate(for: .clockOut, in: container)
+        totalHoursWorked = try container.decodeIfPresent(Double.self, forKey: .totalHoursWorked)
+        totalEarned = try container.decodeIfPresent(Double.self, forKey: .totalEarned)
     }
 
     private static func decodeDate(
@@ -1508,6 +1537,8 @@ private struct TimeClockInsert: Encodable {
 
 private struct TimeClockOutUpdate: Encodable {
     let clock_out: String
+    let total_hours_worked: Double
+    let total_earned: Double?
 }
 
 private struct TimeClockLunchStartUpdate: Encodable {
@@ -1578,15 +1609,21 @@ struct TimeClockCompensationProfile {
             "pay_frequency"
         ])
 
-        let salaryAmount = TimeClockCompensationProfile.double(in: row, keys: ["salary_amount", "salary", "annual_salary"])
-        let dailyAmount = TimeClockCompensationProfile.double(in: row, keys: [
+        let salary = TimeClockCompensationProfile.double(in: row, keys: [
+            "salary",
+            "pay_amount",
+            "compensation_amount",
+            "salary_amount",
+            "annual_salary"
+        ])
+        let legacyDailyAmount = TimeClockCompensationProfile.double(in: row, keys: [
             "daily_salary",
             "daily_rate",
             "day_rate",
             "daily_pay",
             "day_pay"
         ])
-        let hourlyAmount = TimeClockCompensationProfile.double(in: row, keys: [
+        let legacyHourlyAmount = TimeClockCompensationProfile.double(in: row, keys: [
             "hourly_wage",
             "hourly_rate",
             "hour_rate",
@@ -1600,16 +1637,16 @@ struct TimeClockCompensationProfile {
         let resolvedRateLabel: String?
         switch inferredType {
         case .salary:
-            resolvedAmount = salaryAmount ?? genericRate
+            resolvedAmount = salary ?? genericRate
             resolvedRateLabel = resolvedAmount == nil ? nil : "Salary"
         case .daily:
-            resolvedAmount = dailyAmount ?? genericRate
+            resolvedAmount = salary ?? legacyDailyAmount ?? genericRate
             resolvedRateLabel = resolvedAmount == nil ? nil : "Daily Rate"
         case .hourly:
-            resolvedAmount = hourlyAmount ?? genericRate
+            resolvedAmount = salary ?? legacyHourlyAmount ?? genericRate
             resolvedRateLabel = resolvedAmount == nil ? nil : "Hourly Rate"
         case .unknown:
-            resolvedAmount = genericRate ?? hourlyAmount ?? dailyAmount ?? salaryAmount
+            resolvedAmount = salary ?? genericRate ?? legacyHourlyAmount ?? legacyDailyAmount
             resolvedRateLabel = resolvedAmount == nil ? nil : "Rate"
         }
 
@@ -1674,6 +1711,24 @@ struct TimeClockCompensationProfile {
         default:
             return nil
         }
+    }
+
+    func earned(forSessionHours hours: Double) -> Double? {
+        guard let rateAmount, hours > 0 else { return nil }
+
+        let earned: Double
+        switch compensationType {
+        case .hourly:
+            earned = rateAmount * hours
+        case .daily:
+            earned = rateAmount
+        case .salary:
+            earned = (rateAmount / 2080.0) * hours
+        case .unknown:
+            return nil
+        }
+
+        return (earned * 100).rounded() / 100
     }
  
     // Original current pay period april 16 - april 30, 2026
