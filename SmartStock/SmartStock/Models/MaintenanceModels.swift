@@ -287,6 +287,7 @@ struct MaintenanceTicket: Decodable, Identifiable, Hashable {
     let machineId: Int?
     let openedAt: String?
     let openedByUserId: Int?
+    let openedByUserName: String?
     let status: String?
     let priority: String?
     let assignedToName: String?
@@ -305,6 +306,8 @@ struct MaintenanceTicket: Decodable, Identifiable, Hashable {
         case machineId = "machine_id"
         case openedAt = "opened_at"
         case openedByUserId = "opened_by_user_id"
+        case openedByUserName = "opened_by_user_name"
+        case openedByUser = "users"
         case title
         case subject
         case description
@@ -332,6 +335,8 @@ struct MaintenanceTicket: Decodable, Identifiable, Hashable {
         openedAt = try container.decodeIfPresent(String.self, forKey: .openedAt)
             ?? container.decodeIfPresent(String.self, forKey: .createdAt)
         openedByUserId = try container.decodeIfPresent(Int.self, forKey: .openedByUserId)
+        openedByUserName = try container.decodeIfPresent(String.self, forKey: .openedByUserName)
+            ?? container.decodeIfPresent(MaintenanceTicketUser.self, forKey: .openedByUser)?.fullName
         status = try container.decodeIfPresent(String.self, forKey: .status)
         priority = try container.decodeIfPresent(String.self, forKey: .priority)
         assignedToName = try container.decodeIfPresent(String.self, forKey: .assignedToName)
@@ -355,6 +360,101 @@ struct MaintenanceTicket: Decodable, Identifiable, Hashable {
 
     var displayPriority: String {
         priority?.maintenanceDisplayText ?? "Normal"
+    }
+
+    var displayOpenedBy: String {
+        if let openedByUserName = openedByUserName?.nilIfBlank {
+            return openedByUserName
+        }
+
+        if let openedByUserId {
+            return "User #\(openedByUserId)"
+        }
+
+        return "Unknown"
+    }
+
+    var displayOpenedAt: String {
+        guard let openedAt = openedAt?.nilIfBlank else {
+            return "No open date"
+        }
+
+        guard let date = MaintenanceDateFormatter.date(from: openedAt) else {
+            return openedAt
+        }
+
+        return MaintenanceDateFormatter.displayDateTime.string(from: date)
+    }
+
+    var isResolvedOrClosed: Bool {
+        status == "RESOLVED" || status == "CLOSED" || status == "CANCELED"
+    }
+}
+
+struct MaintenanceTicketUser: Decodable, Hashable {
+    let fullName: String?
+
+    enum CodingKeys: String, CodingKey {
+        case fullName = "full_name"
+    }
+}
+
+enum MaintenanceDateFormatter {
+    static let displayDateTime: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .short
+        return formatter
+    }()
+
+    private static let iso8601WithFractionalSeconds: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter
+    }()
+
+    private static let iso8601: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime]
+        return formatter
+    }()
+
+    private static let postgresTimestampWithFractionalSeconds: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.dateFormat = "yyyy-MM-dd HH:mm:ss.SSSSSSXXXXX"
+        return formatter
+    }()
+
+    private static let postgresTimestamp: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.dateFormat = "yyyy-MM-dd HH:mm:ssXXXXX"
+        return formatter
+    }()
+
+    static func date(from value: String) -> Date? {
+        iso8601WithFractionalSeconds.date(from: value)
+            ?? iso8601.date(from: value)
+            ?? postgresTimestampWithFractionalSeconds.date(from: value)
+            ?? postgresTimestamp.date(from: value)
+    }
+}
+
+enum MaintenanceTicketStatus: String, CaseIterable, Identifiable {
+    case open = "OPEN"
+    case inProgress = "IN_PROGRESS"
+    case waitingParts = "WAITING_PARTS"
+    case resolved = "RESOLVED"
+    case closed = "CLOSED"
+    case canceled = "CANCELED"
+
+    var id: String { rawValue }
+
+    var title: String {
+        rawValue.maintenanceDisplayText
     }
 }
 
@@ -512,12 +612,14 @@ enum MaintenanceTicketPriority: String, CaseIterable, Identifiable {
 }
 
 struct MaintenanceIssueDraft {
+    var machineId: Int?
     var problemSummary = ""
     var notes = ""
     var priority: MaintenanceTicketPriority = .normal
 }
 
 struct MaintenanceTicketWritePayload: Encodable {
+    let machineId: Int?
     let openedByUserId: Int?
     let priority: String
     let status: String
@@ -525,11 +627,34 @@ struct MaintenanceTicketWritePayload: Encodable {
     let notes: String?
 
     enum CodingKeys: String, CodingKey {
+        case machineId = "machine_id"
         case openedByUserId = "opened_by_user_id"
         case priority
         case status
         case problemSummary = "problem_summary"
         case notes
+    }
+}
+
+struct MaintenanceTicketStatusUpdatePayload: Encodable {
+    let status: String
+    let resolutionSummary: String?
+    let resolvedAt: String?
+    let closedAt: String?
+
+    enum CodingKeys: String, CodingKey {
+        case status
+        case resolutionSummary = "resolution_summary"
+        case resolvedAt = "resolved_at"
+        case closedAt = "closed_at"
+    }
+}
+
+struct MaintenanceTicketAssignmentPayload: Encodable {
+    let assignedToName: String?
+
+    enum CodingKeys: String, CodingKey {
+        case assignedToName = "assigned_to_name"
     }
 }
 
@@ -546,6 +671,13 @@ extension Decimal {
 extension String {
     var maintenanceDisplayText: String {
         replacingOccurrences(of: "_", with: " ").capitalized
+    }
+}
+
+private extension String {
+    var nilIfBlank: String? {
+        let trimmed = trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
     }
 }
 

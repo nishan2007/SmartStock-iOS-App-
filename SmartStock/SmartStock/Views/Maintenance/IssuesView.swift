@@ -8,6 +8,9 @@ import SwiftUI
 struct IssuesView: View {
     @EnvironmentObject private var sessionManager: SessionManager
     @State private var draft = MaintenanceIssueDraft()
+    @State private var machines: [MaintenanceMachine] = []
+    @State private var isLoadingMachines = false
+    @State private var machineLoadError: String?
     @State private var isSubmitting = false
     @State private var errorMessage: String?
     @State private var didSubmit = false
@@ -42,6 +45,23 @@ struct IssuesView: View {
                 }
             }
 
+            Section("Machine") {
+                if isLoadingMachines {
+                    ProgressView("Loading machines...")
+                } else if let machineLoadError {
+                    Text(machineLoadError)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    Picker("Related Machine", selection: $draft.machineId) {
+                        Text("No Machine").tag(Optional<Int>.none)
+                        ForEach(machines) { machine in
+                            Text(machinePickerLabel(machine)).tag(Optional(machine.id))
+                        }
+                    }
+                }
+            }
+
             Section("Details") {
                 TextField("Add details, steps, location, or anything maintenance should know", text: $draft.notes, axis: .vertical)
                     .lineLimit(5...10)
@@ -63,6 +83,9 @@ struct IssuesView: View {
             }
         }
         .navigationTitle("Issues")
+        .task {
+            await loadMachines()
+        }
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 NavigationLink {
@@ -72,6 +95,18 @@ struct IssuesView: View {
                     Label("Previous Tickets", systemImage: "clock.arrow.circlepath")
                 }
             }
+        }
+    }
+
+    private func loadMachines() async {
+        isLoadingMachines = true
+        machineLoadError = nil
+        defer { isLoadingMachines = false }
+
+        do {
+            machines = try await MaintenanceService.shared.fetchIssueMachines()
+        } catch {
+            machineLoadError = "Machine selection is unavailable."
         }
     }
 
@@ -90,6 +125,14 @@ struct IssuesView: View {
         } catch {
             errorMessage = error.localizedDescription
         }
+    }
+
+    private func machinePickerLabel(_ machine: MaintenanceMachine) -> String {
+        if let assetTag = machine.assetTag?.nilIfBlank {
+            return "\(machine.machineName) (\(assetTag))"
+        }
+
+        return machine.machineName
     }
 }
 
@@ -125,11 +168,15 @@ private struct PreviousIssueTicketsView: View {
                                     .foregroundStyle(statusColor(for: ticket))
                             }
 
-                            Text(ticket.openedAt?.nilIfBlank ?? "No open date")
+                            Text(ticket.displayOpenedAt)
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
 
                             HStack(spacing: 8) {
+                                Text("Created by: \(ticket.displayOpenedBy)")
+                                if let machineId = ticket.machineId {
+                                    Text("Machine #\(machineId)")
+                                }
                                 Text("Priority: \(ticket.displayPriority)")
                                 if let assignedToName = ticket.assignedToName?.nilIfBlank {
                                     Text("Assigned: \(assignedToName)")

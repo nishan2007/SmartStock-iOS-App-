@@ -64,6 +64,60 @@ final class MaintenanceService {
             .value
     }
 
+    func fetchIssueMachines() async throws -> [MaintenanceMachine] {
+        try await supabase
+            .from("maintenance_machines")
+            .select(
+                """
+                machine_id,
+                machine_name,
+                asset_tag,
+                machine_type,
+                location_id,
+                location_name,
+                status,
+                locations(name)
+                """
+            )
+            .neq("status", value: MaintenanceMachineStatus.retired.rawValue)
+            .order("machine_name", ascending: true)
+            .execute()
+            .value
+    }
+
+    func fetchMachine(id: Int) async throws -> MaintenanceMachine? {
+        let rows: [MaintenanceMachine] = try await supabase
+            .from("maintenance_machines")
+            .select(
+                """
+                machine_id,
+                machine_name,
+                asset_tag,
+                serial_number,
+                manufacturer,
+                model,
+                machine_type,
+                location_id,
+                location_name,
+                status,
+                purchase_date,
+                warranty_expiration_date,
+                last_service_date,
+                next_service_date,
+                notes,
+                created_at,
+                updated_at,
+                locations(name)
+                """
+            )
+            .eq("machine_id", value: id)
+            .limit(1)
+            .execute()
+            .value
+
+        return rows.first
+    }
+
     func fetchParts(activeOnly: Bool = false) async throws -> [MaintenancePart] {
         if activeOnly {
             return try await supabase
@@ -126,17 +180,43 @@ final class MaintenanceService {
     func fetchTickets() async throws -> [MaintenanceTicket] {
         try await supabase
             .from("maintenance_tickets")
-            .select("*")
+            .select(ticketSelect)
             .order("opened_at", ascending: false)
             .limit(100)
             .execute()
             .value
     }
 
+    func fetchTicketHistory() async throws -> [MaintenanceTicket] {
+        try await supabase
+            .from("maintenance_tickets")
+            .select(ticketSelect)
+            .in("status", values: [
+                MaintenanceTicketStatus.resolved.rawValue,
+                MaintenanceTicketStatus.closed.rawValue,
+                MaintenanceTicketStatus.canceled.rawValue
+            ])
+            .order("updated_at", ascending: false)
+            .execute()
+            .value
+    }
+
+    func fetchTicket(id: Int) async throws -> MaintenanceTicket? {
+        let rows: [MaintenanceTicket] = try await supabase
+            .from("maintenance_tickets")
+            .select(ticketSelect)
+            .eq("ticket_id", value: id)
+            .limit(1)
+            .execute()
+            .value
+
+        return rows.first
+    }
+
     func fetchTickets(machineId: Int) async throws -> [MaintenanceTicket] {
         try await supabase
             .from("maintenance_tickets")
-            .select("*")
+            .select(ticketSelect)
             .eq("machine_id", value: machineId)
             .order("opened_at", ascending: false)
             .execute()
@@ -146,7 +226,7 @@ final class MaintenanceService {
     func fetchTickets(openedByUserId: Int) async throws -> [MaintenanceTicket] {
         try await supabase
             .from("maintenance_tickets")
-            .select("*")
+            .select(ticketSelect)
             .eq("opened_by_user_id", value: openedByUserId)
             .order("opened_at", ascending: false)
             .execute()
@@ -259,6 +339,7 @@ final class MaintenanceService {
         }
 
         let payload = MaintenanceTicketWritePayload(
+            machineId: draft.machineId,
             openedByUserId: user?.id,
             priority: draft.priority.rawValue,
             status: "OPEN",
@@ -269,6 +350,34 @@ final class MaintenanceService {
         try await supabase
             .from("maintenance_tickets")
             .insert(payload)
+            .execute()
+    }
+
+    func updateTicketStatus(
+        ticketId: Int,
+        status: MaintenanceTicketStatus,
+        resolutionSummary: String? = nil
+    ) async throws {
+        let now = ISO8601DateFormatter().string(from: Date())
+        let payload = MaintenanceTicketStatusUpdatePayload(
+            status: status.rawValue,
+            resolutionSummary: normalizedValue(resolutionSummary ?? ""),
+            resolvedAt: status == .resolved ? now : nil,
+            closedAt: status == .closed || status == .canceled ? now : nil
+        )
+
+        try await supabase
+            .from("maintenance_tickets")
+            .update(payload)
+            .eq("ticket_id", value: ticketId)
+            .execute()
+    }
+
+    func assignTicket(ticketId: Int, technicianName: String?) async throws {
+        try await supabase
+            .from("maintenance_tickets")
+            .update(MaintenanceTicketAssignmentPayload(assignedToName: normalizedValue(technicianName ?? "")))
+            .eq("ticket_id", value: ticketId)
             .execute()
     }
 
@@ -315,6 +424,26 @@ final class MaintenanceService {
         notes,
         created_at,
         updated_at
+        """
+    }
+
+    private var ticketSelect: String {
+        """
+        ticket_id,
+        machine_id,
+        opened_at,
+        opened_by_user_id,
+        priority,
+        status,
+        assigned_to_name,
+        due_date,
+        problem_summary,
+        resolution_summary,
+        notes,
+        resolved_at,
+        closed_at,
+        updated_at,
+        users(full_name)
         """
     }
 

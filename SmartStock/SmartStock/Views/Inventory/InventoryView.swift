@@ -12,6 +12,7 @@ struct InventoryView: View {
     @StateObject private var viewModel = InventoryViewModel()
     @State private var isShowingNewItem = false
     @State private var isShowingScanner = false
+    @State private var isShowingFilters = false
 
     var body: some View {
         NavigationStack {
@@ -35,10 +36,6 @@ struct InventoryView: View {
                     ScrollView {
                         VStack(alignment: .leading, spacing: 16) {
                             summaryCards
-                            if canViewAllStoresInventory {
-                                locationFilterBar
-                            }
-                            statusFilterBar
 
                             LazyVStack(spacing: 12) {
                                 ForEach(viewModel.filteredItems) { item in
@@ -78,6 +75,18 @@ struct InventoryView: View {
 
                 ToolbarItemGroup(placement: .topBarTrailing) {
                     Button {
+                        isShowingFilters = true
+                    } label: {
+                        Image(systemName: activeFilterCount == 0 ? "line.3.horizontal.decrease.circle" : "line.3.horizontal.decrease.circle.fill")
+                            .font(.title3)
+                            .symbolRenderingMode(.hierarchical)
+                            .frame(width: 34, height: 34)
+                            .background(Color(.secondarySystemBackground))
+                            .clipShape(Circle())
+                    }
+                    .accessibilityLabel("Inventory filters")
+
+                    Button {
                         isShowingScanner = true
                     } label: {
                         Image(systemName: "barcode.viewfinder")
@@ -114,6 +123,12 @@ struct InventoryView: View {
                     }
                 )
             }
+            .sheet(isPresented: $isShowingFilters) {
+                NavigationStack {
+                    inventoryFiltersSheet
+                }
+                .presentationDetents([.medium, .large])
+            }
             .sheet(isPresented: $isShowingNewItem) {
                 InventoryItemFormView(mode: .add, defaultStore: sessionManager.selectedStore) {
                     Task {
@@ -148,6 +163,11 @@ struct InventoryView: View {
         sessionManager.currentUser?.canAccess(.viewAllStoresInventory) == true
     }
 
+    private var activeFilterCount: Int {
+        (viewModel.selectedStatus == nil ? 0 : 1)
+            + (canViewAllStoresInventory && viewModel.selectedLocationId != nil ? 1 : 0)
+    }
+
     private func loadInventoryForCurrentPermissions() async {
         if canViewAllStoresInventory {
             await viewModel.loadInventory()
@@ -161,38 +181,6 @@ struct InventoryView: View {
             summaryCard(title: "Items", value: "\(viewModel.totalItemsCount)", systemImage: "shippingbox", tint: .blue)
             summaryCard(title: "Low Stock", value: "\(viewModel.lowStockCount)", systemImage: "exclamationmark.circle", tint: .orange)
             summaryCard(title: "Out", value: "\(viewModel.outOfStockCount)", systemImage: "xmark.circle", tint: .red)
-        }
-    }
-
-    private var locationFilterBar: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
-                filterChip(title: "All Stores", isSelected: viewModel.selectedLocationId == nil) {
-                    viewModel.selectAllLocations()
-                }
-
-                ForEach(viewModel.locations, id: \.id) { location in
-                    filterChip(title: location.name, isSelected: viewModel.selectedLocationId == location.id) {
-                        viewModel.selectedLocationId = location.id
-                    }
-                }
-            }
-        }
-    }
-
-    private var statusFilterBar: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
-                filterChip(title: "All Status", isSelected: viewModel.selectedStatus == nil) {
-                    viewModel.selectedStatus = nil
-                }
-
-                ForEach(InventoryStockStatus.allCases, id: \.self) { status in
-                    filterChip(title: status.rawValue, isSelected: viewModel.selectedStatus == status) {
-                        viewModel.selectedStatus = status
-                    }
-                }
-            }
         }
     }
 
@@ -221,16 +209,52 @@ struct InventoryView: View {
         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
 
-    private func filterChip(title: String, isSelected: Bool, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Text(title)
-                .font(.subheadline.weight(.medium))
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
-                .background(isSelected ? Color.accentColor.opacity(0.18) : Color(.secondarySystemBackground))
-                .foregroundStyle(isSelected ? Color.accentColor : .primary)
-                .clipShape(Capsule())
+    private var inventoryFiltersSheet: some View {
+        List {
+            if canViewAllStoresInventory {
+                Section("Store") {
+                    Picker("Store", selection: $viewModel.selectedLocationId) {
+                        Text("All Stores").tag(Optional<Int>.none)
+                        ForEach(viewModel.locations, id: \.id) { location in
+                            Text(location.name).tag(Optional(location.id))
+                        }
+                    }
+                }
+            }
+
+            Section("Stock Status") {
+                Picker("Status", selection: $viewModel.selectedStatus) {
+                    Text("All Status").tag(Optional<InventoryStockStatus>.none)
+                    ForEach(InventoryStockStatus.allCases, id: \.self) { status in
+                        Text(status.rawValue).tag(Optional(status))
+                    }
+                }
+            }
+
+            Section {
+                Button {
+                    resetFilters()
+                } label: {
+                    Label("Reset Filters", systemImage: "arrow.counterclockwise")
+                }
+                .disabled(activeFilterCount == 0)
+            }
         }
-        .buttonStyle(.plain)
+        .navigationTitle("Filters")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .confirmationAction) {
+                Button("Done") {
+                    isShowingFilters = false
+                }
+            }
+        }
+    }
+
+    private func resetFilters() {
+        if canViewAllStoresInventory {
+            viewModel.selectAllLocations()
+        }
+        viewModel.selectedStatus = nil
     }
 }

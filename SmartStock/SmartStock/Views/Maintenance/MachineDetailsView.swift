@@ -178,7 +178,7 @@ struct MachineDetailsView: View {
                                 .foregroundStyle(.secondary)
                         }
 
-                        Text(ticket.openedAt?.nilIfBlank ?? "No open date")
+                        Text(ticket.displayOpenedAt)
                             .font(.caption)
                             .foregroundStyle(.secondary)
 
