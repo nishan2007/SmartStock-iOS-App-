@@ -12,6 +12,7 @@ struct MainMenuView: View {
         case makeSale
         case customers
         case returns
+        case issues
         case endOfDay
         case sales
         case inventory
@@ -29,6 +30,7 @@ struct MainMenuView: View {
             .makeSale,
             .customers,
             .returns,
+            .issues,
             .endOfDay,
             .timeClock,
             .sales,
@@ -235,6 +237,9 @@ struct MainMenuView: View {
             CustomersView()
         case .returns:
             ReturnsView()
+        case .issues:
+            IssuesView()
+                .environmentObject(sessionManager)
         case .endOfDay:
             EndOfDayView()
         case .sales:
@@ -270,6 +275,8 @@ struct MainMenuView: View {
             return canAccess(.customers)
         case .returns:
             return canAccess(.returns)
+        case .issues:
+            return user != nil
         case .endOfDay:
             return canAccess(.endOfDay)
         case .sales:
@@ -301,6 +308,8 @@ struct MainMenuView: View {
             return "Customers"
         case .returns:
             return "Returns"
+        case .issues:
+            return "Issues"
         case .endOfDay:
             return "End of Day"
         case .sales:
@@ -332,6 +341,8 @@ struct MainMenuView: View {
             return "Profiles and history"
         case .returns:
             return "Refunds and exchanges"
+        case .issues:
+            return "Report problems or ask for help"
         case .endOfDay:
             return "Closeout and notes"
         case .sales:
@@ -363,6 +374,8 @@ struct MainMenuView: View {
             return "person.2.fill"
         case .returns:
             return "arrow.uturn.backward.circle.fill"
+        case .issues:
+            return "questionmark.bubble.fill"
         case .endOfDay:
             return "checkmark.seal.fill"
         case .sales:
@@ -394,6 +407,8 @@ struct MainMenuView: View {
             return .teal
         case .returns:
             return .red
+        case .issues:
+            return .pink
         case .endOfDay:
             return .indigo
         case .sales:

@@ -101,35 +101,27 @@ final class DeviceService {
         }
         let info = collectDeviceInfo(localUsername: receiptDeviceName)
 
-        let existing = try await fetchDevice(installationId: info.installationId)
-
-        let device: TrackedDevice
-        if let existingDevice = existing {
-            if existingDevice.isBlocked {
-                throw DeviceServiceError.blockedDevice
-            }
-
-            device = try await client
-                .from("devices")
-                .update(DeviceWritePayload(info: info, userId: userId, storeId: storeId))
-                .eq("installation_id", value: info.installationId)
-                .select(deviceSelectColumns)
-                .single()
-                .execute()
-                .value
-        } else {
-            device = try await client
-                .from("devices")
-                .insert(DeviceCreatePayload(info: info, userId: userId, storeId: storeId))
-                .select(deviceSelectColumns)
-                .single()
-                .execute()
-                .value
-        }
-
+        let device = try await registerCurrentDeviceWithRPC(info: info, userId: userId, storeId: storeId)
         try await endActiveDeviceSessions(deviceId: device.id, excludingSessionId: nil)
         let sessionId = try await startDeviceSession(deviceId: device.id, userId: userId, storeId: storeId)
         return DeviceRegistrationResult(device: device, sessionId: sessionId)
+    }
+
+    private func registerCurrentDeviceWithRPC(
+        info: DeviceInfoSnapshot,
+        userId: Int?,
+        storeId: Int?
+    ) async throws -> TrackedDevice {
+        let response = try await client
+            .rpc(
+                "register_mobile_device",
+                params: DeviceRegistrationRPCParams(info: info, userId: userId, storeId: storeId)
+            )
+            .select("*")
+            .single()
+            .execute()
+
+        return try decoder.decode(TrackedDevice.self, from: response.data)
     }
 
     func fetchCurrentDevice() async throws -> TrackedDevice? {
@@ -448,6 +440,54 @@ private struct DeviceCreatePayload: Encodable {
         lastSeen = now
         isApproved = false
         isBlocked = false
+    }
+}
+
+private struct DeviceRegistrationRPCParams: Encodable {
+    let installationId: String
+    let deviceFingerprint: String
+    let deviceName: String?
+    let hostname: String?
+    let osName: String?
+    let osVersion: String?
+    let osArch: String?
+    let javaVersion: String?
+    let appVersion: String?
+    let localUsername: String?
+    let macAddresses: String?
+    let userId: Int?
+    let storeId: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case installationId = "p_installation_id"
+        case deviceFingerprint = "p_device_fingerprint"
+        case deviceName = "p_device_name"
+        case hostname = "p_hostname"
+        case osName = "p_os_name"
+        case osVersion = "p_os_version"
+        case osArch = "p_os_arch"
+        case javaVersion = "p_java_version"
+        case appVersion = "p_app_version"
+        case localUsername = "p_local_username"
+        case macAddresses = "p_mac_addresses"
+        case userId = "p_user_id"
+        case storeId = "p_store_id"
+    }
+
+    init(info: DeviceInfoSnapshot, userId: Int?, storeId: Int?) {
+        installationId = info.installationId
+        deviceFingerprint = info.fingerprint
+        deviceName = info.deviceName
+        hostname = info.hostname
+        osName = info.osName
+        osVersion = info.osVersion
+        osArch = info.osArch
+        javaVersion = info.javaVersion
+        appVersion = info.appVersion
+        localUsername = info.localUsername
+        macAddresses = info.macAddresses
+        self.userId = userId
+        self.storeId = storeId
     }
 }
 

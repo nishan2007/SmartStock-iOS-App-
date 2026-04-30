@@ -9,6 +9,7 @@ import Supabase
 enum MaintenanceServiceError: LocalizedError {
     case machineNameRequired
     case partNameRequired
+    case issueSummaryRequired
     case locationRequired
     case invalidNumber(String)
 
@@ -18,6 +19,8 @@ enum MaintenanceServiceError: LocalizedError {
             return "Machine name is required."
         case .partNameRequired:
             return "Part name is required."
+        case .issueSummaryRequired:
+            return "Describe the issue or help request."
         case .locationRequired:
             return "Select a store for this machine."
         case .invalidNumber(let field):
@@ -110,12 +113,42 @@ final class MaintenanceService {
             .value
     }
 
+    func fetchLogs(machineId: Int) async throws -> [MaintenanceLog] {
+        try await supabase
+            .from("maintenance_logs")
+            .select("*")
+            .eq("machine_id", value: machineId)
+            .order("service_date", ascending: false)
+            .execute()
+            .value
+    }
+
     func fetchTickets() async throws -> [MaintenanceTicket] {
         try await supabase
             .from("maintenance_tickets")
             .select("*")
             .order("opened_at", ascending: false)
             .limit(100)
+            .execute()
+            .value
+    }
+
+    func fetchTickets(machineId: Int) async throws -> [MaintenanceTicket] {
+        try await supabase
+            .from("maintenance_tickets")
+            .select("*")
+            .eq("machine_id", value: machineId)
+            .order("opened_at", ascending: false)
+            .execute()
+            .value
+    }
+
+    func fetchTickets(openedByUserId: Int) async throws -> [MaintenanceTicket] {
+        try await supabase
+            .from("maintenance_tickets")
+            .select("*")
+            .eq("opened_by_user_id", value: openedByUserId)
+            .order("opened_at", ascending: false)
             .execute()
             .value
     }
@@ -216,6 +249,26 @@ final class MaintenanceService {
             .from("maintenance_machine_parts")
             .delete()
             .eq("machine_part_id", value: id)
+            .execute()
+    }
+
+    func createIssueTicket(draft: MaintenanceIssueDraft, user: AppUser?) async throws {
+        let summary = draft.problemSummary.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !summary.isEmpty else {
+            throw MaintenanceServiceError.issueSummaryRequired
+        }
+
+        let payload = MaintenanceTicketWritePayload(
+            openedByUserId: user?.id,
+            priority: draft.priority.rawValue,
+            status: "OPEN",
+            problemSummary: summary,
+            notes: normalizedValue(draft.notes)
+        )
+
+        try await supabase
+            .from("maintenance_tickets")
+            .insert(payload)
             .execute()
     }
 

@@ -75,7 +75,12 @@ struct MaintenanceView: View {
                     ContentUnavailableView("No Machines", systemImage: "wrench.and.screwdriver")
                 } else {
                     ForEach(machines) { machine in
-                        MachineSummaryRow(machine: machine)
+                        NavigationLink {
+                            MachineDetailsView(machine: machine)
+                                .environmentObject(sessionManager)
+                        } label: {
+                            MachineSummaryRow(machine: machine)
+                        }
                     }
                 }
             }

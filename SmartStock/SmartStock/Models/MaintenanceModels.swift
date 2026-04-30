@@ -498,6 +498,41 @@ struct MaintenanceMachinePartWritePayload: Encodable {
     }
 }
 
+enum MaintenanceTicketPriority: String, CaseIterable, Identifiable {
+    case low = "LOW"
+    case normal = "NORMAL"
+    case high = "HIGH"
+    case urgent = "URGENT"
+
+    var id: String { rawValue }
+
+    var title: String {
+        rawValue.maintenanceDisplayText
+    }
+}
+
+struct MaintenanceIssueDraft {
+    var problemSummary = ""
+    var notes = ""
+    var priority: MaintenanceTicketPriority = .normal
+}
+
+struct MaintenanceTicketWritePayload: Encodable {
+    let openedByUserId: Int?
+    let priority: String
+    let status: String
+    let problemSummary: String
+    let notes: String?
+
+    enum CodingKeys: String, CodingKey {
+        case openedByUserId = "opened_by_user_id"
+        case priority
+        case status
+        case problemSummary = "problem_summary"
+        case notes
+    }
+}
+
 extension Decimal {
     var maintenanceNumberText: String {
         let number = NSDecimalNumber(decimal: self)
