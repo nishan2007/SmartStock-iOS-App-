@@ -16,31 +16,15 @@ struct CustomOrdersView: View {
         TabView {
             if can(.createCustomOrder) {
                 CustomOrderEntryView()
-                    .tabItem { Label("New", systemImage: "plus.circle.fill") }
+                    .tabItem { Label("New Order", systemImage: "plus.circle.fill") }
             }
 
             CustomOrderListView(title: "Lookup", scope: .lookup(""))
                 .tabItem { Label("Lookup", systemImage: "magnifyingglass") }
 
-            if let userId = sessionManager.currentUser?.id, can(.viewAssignedCustomOrders) {
-                CustomOrderListView(title: "My Orders", scope: .assigned(userId: userId))
-                    .tabItem { Label("Mine", systemImage: "person.crop.circle") }
-            }
-
-            if can(.manageCustomOrders) {
-                CustomOrderListView(title: "All Orders", scope: .all, readOnly: true)
-                    .tabItem { Label("All", systemImage: "tray.full.fill") }
-            }
-
-            if can(.ordersManagerDashboard) || can(.manageCustomOrders) {
-                CustomOrderManagerDashboardView()
-                    .tabItem { Label("Manager", systemImage: "chart.bar.doc.horizontal") }
-            }
-
-            if can(.ordersEndOfDay) {
-                CustomOrderEndOfDayView()
-                    .tabItem { Label("EOD", systemImage: "checkmark.seal.fill") }
-            }
+            CustomOrderManagementMenuView()
+                .environmentObject(sessionManager)
+                .tabItem { Label("More", systemImage: "square.grid.2x2.fill") }
         }
         .navigationTitle("Custom Orders")
         .navigationBarTitleDisplayMode(.inline)
@@ -48,6 +32,90 @@ struct CustomOrdersView: View {
 
     private func can(_ permission: MobilePermission) -> Bool {
         sessionManager.currentUser?.canAccess(permission) == true
+    }
+}
+
+private struct CustomOrderManagementMenuView: View {
+    @EnvironmentObject private var sessionManager: SessionManager
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                Text("Order Management")
+                    .font(.title2.weight(.bold))
+
+                LazyVStack(spacing: 12) {
+                    if let userId = sessionManager.currentUser?.id, can(.viewAssignedCustomOrders) {
+                        menuLink(title: "My Orders", subtitle: "Orders assigned to you", systemImage: "person.crop.circle", tint: .blue) {
+                            CustomOrderListView(title: "My Orders", scope: .assigned(userId: userId))
+                                .environmentObject(sessionManager)
+                        }
+                    }
+
+                    if can(.manageCustomOrders) {
+                        menuLink(title: "All Orders", subtitle: "View all custom orders", systemImage: "tray.full.fill", tint: .purple) {
+                            CustomOrderListView(title: "All Orders", scope: .all, readOnly: true)
+                                .environmentObject(sessionManager)
+                        }
+                    }
+
+                    if can(.ordersManagerDashboard) || can(.manageCustomOrders) {
+                        menuLink(title: "Manager Dashboard", subtitle: "Location orders, assignment, and status", systemImage: "chart.bar.doc.horizontal", tint: .orange) {
+                            CustomOrderManagerDashboardView()
+                                .environmentObject(sessionManager)
+                        }
+                    }
+
+                    if can(.ordersEndOfDay) {
+                        menuLink(title: "End Of Day", subtitle: "Payments, refunds, and method totals", systemImage: "checkmark.seal.fill", tint: .green) {
+                            CustomOrderEndOfDayView()
+                                .environmentObject(sessionManager)
+                        }
+                    }
+                }
+            }
+            .padding()
+        }
+        .navigationTitle("Custom Orders")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private func can(_ permission: MobilePermission) -> Bool {
+        sessionManager.currentUser?.canAccess(permission) == true
+    }
+
+    private func menuLink<Destination: View>(title: String, subtitle: String, systemImage: String, tint: Color, @ViewBuilder destination: @escaping () -> Destination) -> some View {
+        NavigationLink {
+            destination()
+        } label: {
+            HStack(spacing: 14) {
+                Image(systemName: systemImage)
+                    .font(.headline)
+                    .foregroundStyle(.white)
+                    .frame(width: 42, height: 42)
+                    .background(tint.gradient)
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(title)
+                        .font(.headline)
+                        .foregroundStyle(.primary)
+                    Text(subtitle)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer()
+
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+            }
+            .padding()
+            .background(Color(.secondarySystemBackground))
+            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        }
+        .buttonStyle(.plain)
     }
 }
 
@@ -66,46 +134,71 @@ private struct CustomOrderListView: View {
     @State private var selectedOrder: CustomOrder?
 
     var body: some View {
-        List {
-            if case .lookup = scope {
-                Section {
-                    HStack {
-                        TextField("Order, customer, or phone", text: $lookupText)
-                            .textInputAutocapitalization(.never)
-                        Button {
-                            Task { await loadOrders() }
-                        } label: {
-                            Image(systemName: "magnifyingglass")
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                if case .lookup = scope {
+                    CustomOrderCard {
+                        HStack(spacing: 12) {
+                            TextField("Order, customer, or phone", text: $lookupText)
+                                .textInputAutocapitalization(.never)
+                                .autocorrectionDisabled(true)
+                                .onSubmit { Task { await loadOrders() } }
+
+                            Button {
+                                Task { await loadOrders() }
+                            } label: {
+                                Image(systemName: "magnifyingglass")
+                                    .font(.headline)
+                            }
+                            .buttonStyle(.bordered)
+                            .disabled(lookupText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                         }
-                        .buttonStyle(.bordered)
+                    }
+                }
+
+                if let errorMessage {
+                    Text(errorMessage)
+                        .font(.callout)
+                        .foregroundStyle(.red)
+                        .padding()
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(Color.red.opacity(0.10))
+                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                }
+
+                if orders.isEmpty && !isLoading && errorMessage == nil {
+                    ContentUnavailableView(title, systemImage: "list.clipboard", description: Text("No custom orders found."))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 60)
+                } else {
+                    LazyVStack(spacing: 12) {
+                        ForEach(orders) { order in
+                            Button { selectedOrder = order } label: {
+                                HStack {
+                                    CustomOrderRow(order: order)
+                                    Spacer()
+                                    Image(systemName: "chevron.right")
+                                        .font(.caption.weight(.semibold))
+                                        .foregroundStyle(.secondary)
+                                }
+                                .padding()
+                                .background(orderRowBackground(order))
+                                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                        .stroke(statusTint(for: order).opacity(0.28), lineWidth: 1)
+                                )
+                            }
+                            .buttonStyle(.plain)
+                        }
                     }
                 }
             }
-
-            if let errorMessage {
-                Section { Text(errorMessage).foregroundStyle(.red) }
-            }
-
-            Section {
-                ForEach(orders) { order in
-                    Button { selectedOrder = order } label: {
-                        HStack {
-                            CustomOrderRow(order: order)
-                            Spacer()
-                            Image(systemName: "chevron.right")
-                                .font(.caption.weight(.semibold))
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
+            .padding()
         }
         .overlay {
             if isLoading && orders.isEmpty {
                 ProgressView("Loading orders...")
-            } else if orders.isEmpty && errorMessage == nil {
-                ContentUnavailableView(title, systemImage: "list.clipboard", description: Text("No custom orders found."))
             }
         }
         .navigationTitle(title)
@@ -134,6 +227,21 @@ private struct CustomOrderListView: View {
             errorMessage = error.localizedDescription
         }
     }
+
+    private func orderRowBackground(_ order: CustomOrder) -> Color {
+        switch order.status {
+        case .new:
+            return Color.blue.opacity(0.10)
+        case .assigned, .inProgress:
+            return Color.orange.opacity(0.12)
+        case .ready:
+            return Color.purple.opacity(0.10)
+        case .delivered, .completed:
+            return Color(.secondarySystemBackground)
+        case .cancelled:
+            return Color.red.opacity(0.10)
+        }
+    }
 }
 
 private struct CustomOrderRow: View {
@@ -147,7 +255,7 @@ private struct CustomOrderRow: View {
                 Spacer()
                 Text(order.status.title)
                     .font(.caption.weight(.semibold))
-                    .foregroundStyle(statusTint)
+                    .foregroundStyle(statusTint(for: order))
             }
 
             Text(order.customerName)
@@ -166,15 +274,27 @@ private struct CustomOrderRow: View {
         }
         .padding(.vertical, 4)
     }
+}
 
-    private var statusTint: Color {
-        switch order.status {
-        case .new: return .blue
-        case .assigned, .inProgress: return .orange
-        case .ready: return .purple
-        case .delivered, .completed: return .green
-        case .cancelled: return .red
-        }
+private func statusTint(for order: CustomOrder) -> Color {
+    switch order.status {
+    case .new: return .blue
+    case .assigned, .inProgress: return .orange
+    case .ready: return .purple
+    case .delivered, .completed: return .green
+    case .cancelled: return .red
+    }
+}
+
+private struct CustomOrderCard<Content: View>: View {
+    @ViewBuilder let content: Content
+
+    var body: some View {
+        content
+            .padding()
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color(.secondarySystemBackground))
+            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
 }
 
@@ -182,6 +302,23 @@ private struct LineDiscountSheetSelection: Identifiable {
     let id = UUID()
     let lineIndex: Int
     let line: CustomOrderDraftLine
+}
+
+private enum CustomOrderEntryStep: String, CaseIterable, Identifiable {
+    case lines = "Lines"
+    case review = "Review"
+    case customer = "Customer"
+    case payment = "Payment"
+
+    var id: String { rawValue }
+    var systemImage: String {
+        switch self {
+        case .lines: return "list.bullet.rectangle"
+        case .review: return "checklist"
+        case .customer: return "person.crop.circle"
+        case .payment: return "creditcard"
+        }
+    }
 }
 
 private struct CustomOrderEntryView: View {
@@ -220,27 +357,149 @@ private struct CustomOrderEntryView: View {
     @State private var isSaving = false
     @State private var errorMessage: String?
     @State private var createdOrderMessage: String?
+    @State private var currentStep: CustomOrderEntryStep = .lines
+    @State private var isPrintAddonsSheetPresented = false
 
     var body: some View {
-        Form {
-            if let errorMessage { Section { Text(errorMessage).foregroundStyle(.red) } }
-            if let createdOrderMessage { Section { Text(createdOrderMessage).foregroundStyle(.green) } }
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                entrySummaryTiles
+                stepPicker
 
-                Section("Customer") {
-                    Picker("Existing Customer", selection: $selectedCustomerId) {
-                        Text("New customer").tag(Int?.none)
-                        ForEach(customerAccounts.filter(\.isActive)) { customer in
-                            Text(customer.name).tag(Int?.some(customer.customerId))
-                        }
-                    }
-                    .onChange(of: selectedCustomerId) { _, _ in fillSelectedCustomer() }
-
-                    TextField("Customer name", text: $customerName)
-                    TextField("Phone number", text: $customerPhone)
-                        .keyboardType(.phonePad)
+                if let errorMessage {
+                    statusMessage(errorMessage, tint: .red)
+                }
+                if let createdOrderMessage {
+                    statusMessage(createdOrderMessage, tint: .green)
                 }
 
-                Section("Add Line") {
+                currentStepContent
+                stepControls
+            }
+            .padding()
+        }
+        .navigationTitle("New Custom Order")
+        .navigationBarTitleDisplayMode(.inline)
+        .dismissKeyboardOnTap()
+        .scrollDismissesKeyboard(.interactively)
+        .task { await loadLookups() }
+        .sheet(item: $discountSelection) { selection in
+            discountSheet(for: selection)
+        }
+        .sheet(isPresented: $isPrintAddonsSheetPresented) {
+            NavigationStack {
+                printAddonsEditor
+                    .navigationTitle("Print Add Ons")
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar {
+                        ToolbarItem(placement: .confirmationAction) {
+                            Button("Done") { isPrintAddonsSheetPresented = false }
+                        }
+                    }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var currentStepContent: some View {
+        switch currentStep {
+        case .customer:
+            customerStep
+        case .lines:
+            linesStep
+        case .review:
+            reviewStep
+        case .payment:
+            paymentStep
+        }
+    }
+
+    private var stepPicker: some View {
+        HStack(spacing: 8) {
+            ForEach(CustomOrderEntryStep.allCases) { step in
+                Button {
+                    moveToStep(step)
+                } label: {
+                    VStack(spacing: 6) {
+                        Image(systemName: step.systemImage)
+                        Text(step.rawValue)
+                            .font(.caption2.weight(.semibold))
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 10)
+                    .foregroundStyle(currentStep == step ? .white : .primary)
+                    .background(currentStep == step ? Color.accentColor : Color(.secondarySystemBackground))
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+
+    private var entrySummaryTiles: some View {
+        HStack(spacing: 12) {
+            summaryTile("Lines", "\(lines.count)", "list.bullet.rectangle", .blue)
+            summaryTile("Total", String(format: "$%.2f", orderTotal), "dollarsign.circle", .green)
+            summaryTile("Deposit", String(format: "$%.2f", minimumDepositRequired), "percent", .orange)
+        }
+    }
+
+    private func summaryTile(_ title: String, _ value: String, _ icon: String, _ tint: Color) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Image(systemName: icon)
+                .foregroundStyle(tint)
+            Text(value)
+                .font(.headline.weight(.bold))
+                .lineLimit(1)
+                .minimumScaleFactor(0.72)
+            Text(title)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding()
+        .background(
+            LinearGradient(colors: [tint.opacity(0.15), Color(.secondarySystemBackground)], startPoint: .topLeading, endPoint: .bottomTrailing)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+
+    private func statusMessage(_ message: String, tint: Color) -> some View {
+        Text(message)
+            .font(.callout)
+            .foregroundStyle(tint)
+            .padding()
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(tint.opacity(0.10))
+            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+
+    private var customerStep: some View {
+        CustomOrderCard {
+            VStack(alignment: .leading, spacing: 14) {
+                Text("Customer")
+                    .font(.headline)
+                Picker("Existing Customer", selection: $selectedCustomerId) {
+                    Text("New customer").tag(Int?.none)
+                    ForEach(customerAccounts.filter(\.isActive)) { customer in
+                        Text(customer.name).tag(Int?.some(customer.customerId))
+                    }
+                }
+                .onChange(of: selectedCustomerId) { _, _ in fillSelectedCustomer() }
+
+                TextField("Customer name", text: $customerName)
+                TextField("Phone number", text: $customerPhone)
+                    .keyboardType(.phonePad)
+            }
+        }
+    }
+
+    private var linesStep: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            CustomOrderCard {
+                VStack(alignment: .leading, spacing: 14) {
+                    Text("Add Line")
+                        .font(.headline)
                     HStack {
                         TextField("Scan SKU or barcode", text: $itemLookupText)
                             .textInputAutocapitalization(.characters)
@@ -314,63 +573,23 @@ private struct CustomOrderEntryView: View {
                         }
                     }
 
-                    DisclosureGroup("Print Add Ons") {
-                        ForEach(draftLine.printAddons.indices, id: \.self) { index in
-                            VStack(alignment: .leading, spacing: 10) {
-                                Picker("Material", selection: materialSelectionBinding(for: index)) {
-                                    Text("Select material").tag(Int64?.none)
-                                    ForEach(printMaterials) { material in
-                                        Text(material.materialName).tag(Int64?.some(material.materialId))
-                                    }
-                                }
-
-                                Picker("Print Size", selection: presetSelectionBinding(for: index)) {
-                                    Text("Custom size / price").tag(Int64?.none)
-                                    ForEach(presetsForAddon(at: index)) { preset in
-                                        Text("\(preset.presetName) - \(preset.priceText)").tag(Int64?.some(preset.presetId))
-                                    }
-                                }
-
-                                if draftLine.printAddons[index].preset == nil {
-                                    Picker("Pricing", selection: $draftLine.printAddons[index].pricingMode) {
-                                        Text("Fixed").tag("FIXED_PRESET")
-                                        Text("By Lines").tag("PER_LINE")
-                                    }
-                                    .pickerStyle(.segmented)
-                                } else {
-                                    LabeledContent("Pricing", value: draftLine.printAddons[index].pricingMode == "PER_LINE" ? "By Lines" : "Fixed")
-                                }
-
-                                TextField(pricePlaceholder(for: draftLine.printAddons[index]), text: $draftLine.printAddons[index].priceText)
-                                    .keyboardType(.decimalPad)
-
-                                if draftLine.printAddons[index].pricingMode == "PER_LINE" {
-                                    TextField("Number of print lines", text: $draftLine.printAddons[index].lineCountText)
-                                        .keyboardType(.numberPad)
-                                }
-
-                                TextField("Print description", text: $draftLine.printAddons[index].printDescription, axis: .vertical)
-
-                                HStack {
-                                    Text(addonSummary(draftLine.printAddons[index]))
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                    Spacer()
-                                    Button(role: .destructive) {
-                                        draftLine.printAddons.remove(at: index)
-                                    } label: {
-                                        Image(systemName: "trash")
-                                    }
-                                }
-                            }
-                            .padding(.vertical, 6)
-                        }
-                        Button {
+                    Button {
+                        if draftLine.printAddons.isEmpty {
                             draftLine.printAddons.append(newPrintAddonDraft())
-                        } label: {
-                            Label("Add Print Add On", systemImage: "plus.circle")
+                        }
+                        isPrintAddonsSheetPresented = true
+                    } label: {
+                        HStack {
+                            Label("Print Add Ons", systemImage: "paintpalette")
+                            Spacer()
+                            Text(draftLine.printAddons.isEmpty ? "Optional" : "\(draftLine.printAddons.count)")
+                                .foregroundStyle(.secondary)
+                            Image(systemName: "chevron.right")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.secondary)
                         }
                     }
+                    .buttonStyle(.plain)
 
                     if designPlacements.isEmpty {
                         Text("No design placements found.")
@@ -407,12 +626,18 @@ private struct CustomOrderEntryView: View {
                         addLine()
                     } label: {
                         Label("Add Line", systemImage: "plus.circle")
+                            .frame(maxWidth: .infinity)
                     }
+                    .buttonStyle(.borderedProminent)
                     .disabled(selectedItem == nil || (selectedItem?.hasVariants == true && selectedVariant == nil))
                 }
+            }
 
-                if !lines.isEmpty {
-                    Section("Lines") {
+            if !lines.isEmpty {
+                CustomOrderCard {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("Cart Lines")
+                            .font(.headline)
                         ForEach(Array(lines.enumerated()), id: \.element.id) { index, line in
                             VStack(alignment: .leading, spacing: 6) {
                                 HStack {
@@ -451,50 +676,103 @@ private struct CustomOrderEntryView: View {
                                 }
                                 .tint(.blue)
                             }
+                            Divider()
                         }
-                        .onDelete { lines.remove(atOffsets: $0) }
 
                         LabeledContent("Total", value: String(format: "$%.2f", orderTotal))
                         LabeledContent("Minimum deposit", value: String(format: "$%.2f", minimumDepositRequired))
                     }
                 }
+            }
+        }
+    }
 
-                Section("Order") {
+    private var reviewStep: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            CustomOrderCard {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("Review Order")
+                        .font(.headline)
+                    LabeledContent("Lines", value: "\(lines.count)")
+                    LabeledContent("Total", value: String(format: "$%.2f", orderTotal))
+                    LabeledContent("Minimum deposit", value: String(format: "$%.2f", minimumDepositRequired))
+                    Text("Customer details are entered after review.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            CustomOrderCard {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("Order Details")
+                        .font(.headline)
                     Toggle("Due date", isOn: $hasDueDate)
-                    if hasDueDate { DatePicker("Due", selection: $dueDate, displayedComponents: .date) }
+                    if hasDueDate {
+                        DatePicker("Due", selection: $dueDate, displayedComponents: .date)
+                    }
                     TextField("Order notes", text: $orderNotes, axis: .vertical)
                 }
+            }
 
-                Section("Payment") {
-                    Picker("Method", selection: $paymentMethod) {
-                        ForEach(CustomOrderPaymentMethod.allCases) { method in
-                            Text(method.title).tag(method)
+            CustomOrderCard {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Lines")
+                        .font(.headline)
+                    if lines.isEmpty {
+                        Text("No lines added.")
+                            .foregroundStyle(.secondary)
+                    } else {
+                        ForEach(lines) { line in
+                            VStack(alignment: .leading, spacing: 4) {
+                                HStack {
+                                    Text(line.variant.map { "\(line.item.itemName) - \($0.variantName)" } ?? line.item.itemName)
+                                        .font(.subheadline.weight(.semibold))
+                                    Spacer()
+                                    Text(String(format: "$%.2f", line.lineTotal))
+                                }
+                                if line.discountPercent > 0 || !line.printAddons.isEmpty || !line.lineNotes.isEmpty {
+                                    Text(reviewLineDetails(line))
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                            Divider()
                         }
                     }
-                    TextField("Upfront payment", text: $paymentAmountText)
-                        .keyboardType(.decimalPad)
-                    if paymentMethod.requiresReference {
-                        TextField("Payment reference", text: $paymentReference)
-                    }
-                    if upfrontPayment + 0.0001 < minimumDepositRequired {
-                        TextField("Deposit override reason", text: $depositOverrideReason, axis: .vertical)
+                }
+            }
+        }
+    }
+
+    private var paymentStep: some View {
+        CustomOrderCard {
+            VStack(alignment: .leading, spacing: 14) {
+                Text("Payment")
+                    .font(.headline)
+                Picker("Method", selection: $paymentMethod) {
+                    ForEach(CustomOrderPaymentMethod.allCases) { method in
+                        Text(method.title).tag(method)
                     }
                 }
-
+                TextField("Upfront payment", text: $paymentAmountText)
+                    .keyboardType(.decimalPad)
+                if paymentMethod.requiresReference {
+                    TextField("Payment reference", text: $paymentReference)
+                }
+                LabeledContent("Customer", value: customerName)
+                LabeledContent("Phone", value: customerPhone)
+                if upfrontPayment + 0.0001 < minimumDepositRequired {
+                    TextField("Deposit override reason", text: $depositOverrideReason, axis: .vertical)
+                }
                 Button {
                     Task { await save() }
                 } label: {
                     Label(isSaving ? "Creating" : "Create Custom Order", systemImage: "checkmark.circle.fill")
                         .frame(maxWidth: .infinity)
                 }
+                .buttonStyle(.borderedProminent)
                 .disabled(isSaving || lines.isEmpty)
-        }
-        .navigationTitle("New Custom Order")
-        .dismissKeyboardOnTap()
-        .scrollDismissesKeyboard(.interactively)
-        .task { await loadLookups() }
-        .sheet(item: $discountSelection) { selection in
-            discountSheet(for: selection)
+            }
         }
     }
 
@@ -521,6 +799,96 @@ private struct CustomOrderEntryView: View {
     private var orderTotal: Double { lines.reduce(0) { $0 + $1.lineTotal } }
     private var upfrontPayment: Double { Double(paymentAmountText.trimmingCharacters(in: .whitespacesAndNewlines)) ?? 0 }
     private var minimumDepositRequired: Double { orderTotal * preferences.customOrderMinimumDepositPercent / 100 }
+
+    private var stepControls: some View {
+        HStack(spacing: 12) {
+            if currentStep != CustomOrderEntryStep.allCases.first {
+                Button {
+                    moveToPreviousStep()
+                } label: {
+                    Label("Back", systemImage: "chevron.left")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+            }
+
+            if currentStep != .payment {
+                Button {
+                    moveToNextStep()
+                } label: {
+                    Label(currentStep == .customer ? "Continue to Payment" : "Next", systemImage: "chevron.right")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+            }
+        }
+    }
+
+    private var printAddonsEditor: some View {
+        List {
+            if draftLine.printAddons.isEmpty {
+                Section {
+                    Text("No print add-ons selected.")
+                        .foregroundStyle(.secondary)
+                }
+            } else {
+                ForEach(draftLine.printAddons.indices, id: \.self) { index in
+                    Section("Print Add On \(index + 1)") {
+                        Picker("Material", selection: materialSelectionBinding(for: index)) {
+                            Text("Select material").tag(Int64?.none)
+                            ForEach(printMaterials) { material in
+                                Text(material.materialName).tag(Int64?.some(material.materialId))
+                            }
+                        }
+
+                        Picker("Print Size", selection: presetSelectionBinding(for: index)) {
+                            Text("Custom size / price").tag(Int64?.none)
+                            ForEach(presetsForAddon(at: index)) { preset in
+                                Text("\(preset.presetName) - \(preset.priceText)").tag(Int64?.some(preset.presetId))
+                            }
+                        }
+
+                        if draftLine.printAddons[index].preset == nil {
+                            Picker("Pricing", selection: $draftLine.printAddons[index].pricingMode) {
+                                Text("Fixed").tag("FIXED_PRESET")
+                                Text("By Lines").tag("PER_LINE")
+                            }
+                            .pickerStyle(.segmented)
+                        } else {
+                            LabeledContent("Pricing", value: draftLine.printAddons[index].pricingMode == "PER_LINE" ? "By Lines" : "Fixed")
+                        }
+
+                        TextField(pricePlaceholder(for: draftLine.printAddons[index]), text: $draftLine.printAddons[index].priceText)
+                            .keyboardType(.decimalPad)
+
+                        if draftLine.printAddons[index].pricingMode == "PER_LINE" {
+                            TextField("Number of print lines", text: $draftLine.printAddons[index].lineCountText)
+                                .keyboardType(.numberPad)
+                        }
+
+                        TextField("Print description", text: $draftLine.printAddons[index].printDescription, axis: .vertical)
+                        LabeledContent("Charge", value: addonSummary(draftLine.printAddons[index]))
+
+                        Button(role: .destructive) {
+                            draftLine.printAddons.remove(at: index)
+                        } label: {
+                            Label("Remove Print Add On", systemImage: "trash")
+                        }
+                    }
+                }
+            }
+
+            Section {
+                Button {
+                    draftLine.printAddons.append(newPrintAddonDraft())
+                } label: {
+                    Label("Add Print Add On", systemImage: "plus.circle")
+                }
+            }
+        }
+        .dismissKeyboardOnTap()
+        .scrollDismissesKeyboard(.interactively)
+    }
 
     @ViewBuilder
     private func discountSheet(for selection: LineDiscountSheetSelection) -> some View {
@@ -599,6 +967,81 @@ private struct CustomOrderEntryView: View {
         guard let selectedCustomer else { return }
         customerName = selectedCustomer.name
         customerPhone = selectedCustomer.phone ?? ""
+    }
+
+    private func moveToStep(_ step: CustomOrderEntryStep) {
+        guard canNavigate(to: step) else { return }
+        errorMessage = nil
+        currentStep = step
+    }
+
+    private func moveToNextStep() {
+        guard let currentIndex = CustomOrderEntryStep.allCases.firstIndex(of: currentStep),
+              currentIndex + 1 < CustomOrderEntryStep.allCases.count else {
+            return
+        }
+        moveToStep(CustomOrderEntryStep.allCases[currentIndex + 1])
+    }
+
+    private func moveToPreviousStep() {
+        guard let currentIndex = CustomOrderEntryStep.allCases.firstIndex(of: currentStep),
+              currentIndex > 0 else {
+            return
+        }
+        currentStep = CustomOrderEntryStep.allCases[currentIndex - 1]
+        errorMessage = nil
+    }
+
+    private func canNavigate(to step: CustomOrderEntryStep) -> Bool {
+        switch step {
+        case .lines:
+            return true
+        case .review:
+            return validateLinesStep()
+        case .customer:
+            return validateLinesStep()
+        case .payment:
+            guard validateCustomerStep() && validateLinesStep() else { return false }
+            guard currentStep == .customer || currentStep == .payment else {
+                errorMessage = "Enter customer details before continuing to payment."
+                currentStep = .customer
+                return false
+            }
+            return true
+        }
+    }
+
+    private func validateCustomerStep() -> Bool {
+        guard !customerName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              !customerPhone.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            errorMessage = "Enter a customer name and phone number before continuing."
+            currentStep = .customer
+            return false
+        }
+        return true
+    }
+
+    private func validateLinesStep() -> Bool {
+        guard !lines.isEmpty else {
+            errorMessage = "Add at least one custom order line before review."
+            currentStep = .lines
+            return false
+        }
+        return true
+    }
+
+    private func reviewLineDetails(_ line: CustomOrderDraftLine) -> String {
+        var details: [String] = []
+        if line.discountPercent > 0 {
+            details.append("Discount \(String(format: "%.1f", line.discountPercent))%")
+        }
+        if !line.printAddons.isEmpty {
+            details.append("\(line.printAddons.count) print add-on\(line.printAddons.count == 1 ? "" : "s")")
+        }
+        if !line.lineNotes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            details.append(line.lineNotes)
+        }
+        return details.joined(separator: " | ")
     }
 
     private func applyItemLookup() async {
@@ -837,6 +1280,7 @@ private struct CustomOrderEntryView: View {
             paymentAmountText = ""
             paymentReference = ""
             depositOverrideReason = ""
+            currentStep = .lines
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -855,6 +1299,7 @@ private struct CustomOrderDetailView: View {
     @State private var employees: [CustomOrderEmployee] = []
     @State private var selectedEmployeeId: Int?
     @State private var selectedStatus: CustomOrderStatus
+    @State private var selectedProductionStatuses: [Int64: CustomOrderProductionStatus] = [:]
     @State private var productionNotes = ""
     @State private var deliveryNotes = ""
     @State private var refundReason = "Payment Mistake"
@@ -897,7 +1342,7 @@ private struct CustomOrderDetailView: View {
                     DisclosureGroup(isExpanded: $isLinesExpanded) {
                         ForEach(order.lines) { line in
                             VStack(alignment: .leading, spacing: 14) {
-                                CustomOrderLineDetailCard(line: line)
+                                CustomOrderLineDetailCard(line: line, productionStatus: currentProductionStatus(for: line))
                                 if !readOnly {
                                     lineActions(line)
                                 }
@@ -1125,15 +1570,11 @@ private struct CustomOrderDetailView: View {
     private func lineActions(_ line: CustomOrderLine) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             if can(.customOrderProductionSteps) || canManage {
-                Menu {
+                Picker("Production", selection: productionStatusBinding(for: line)) {
                     ForEach(CustomOrderProductionStatus.allCases) { status in
-                        Button(status.title) { Task { await updateProduction(line, status: status) } }
+                        Text(status.title).tag(status)
                     }
-                } label: {
-                    Label("Production", systemImage: "checklist")
-                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .buttonStyle(.bordered)
                 .disabled(actionInProgress)
             }
 
@@ -1176,6 +1617,23 @@ private struct CustomOrderDetailView: View {
         sessionManager.currentUser?.canAccess(permission) == true
     }
 
+    private func currentProductionStatus(for line: CustomOrderLine) -> CustomOrderProductionStatus {
+        selectedProductionStatuses[line.customOrderLineId] ?? line.productionStatus
+    }
+
+    private func productionStatusBinding(for line: CustomOrderLine) -> Binding<CustomOrderProductionStatus> {
+        Binding(
+            get: {
+                currentProductionStatus(for: line)
+            },
+            set: { newStatus in
+                Task {
+                    await updateProduction(line, status: newStatus)
+                }
+            }
+        )
+    }
+
     private var selectedEmployee: CustomOrderEmployee? {
         guard let selectedEmployeeId else { return nil }
         return employees.first { $0.userId == selectedEmployeeId }
@@ -1210,10 +1668,13 @@ private struct CustomOrderDetailView: View {
     private func updateProduction(_ line: CustomOrderLine, status: CustomOrderProductionStatus) async {
         guard let user = sessionManager.currentUser else { return }
         guard !actionInProgress else { return }
+        let oldStatus = currentProductionStatus(for: line)
+        guard oldStatus != status else { return }
         actionInProgress = true
         defer { actionInProgress = false }
         do {
-            try await service.updateLineProduction(order: order, line: line, status: status, notes: productionNotes, user: user, device: sessionManager.currentDevice)
+            try await service.updateLineProduction(order: order, line: line, status: status, oldStatus: oldStatus, notes: productionNotes, user: user, device: sessionManager.currentDevice)
+            selectedProductionStatuses[line.customOrderLineId] = status
             await onSaved()
         } catch { errorMessage = error.localizedDescription }
     }
@@ -1336,6 +1797,7 @@ private struct CustomOrderSummaryRows: View {
 
 private struct CustomOrderLineDetailCard: View {
     let line: CustomOrderLine
+    var productionStatus: CustomOrderProductionStatus? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -1353,7 +1815,7 @@ private struct CustomOrderLineDetailCard: View {
             }
 
             HStack {
-                statusPill("Production", line.productionStatus.title)
+                statusPill("Production", (productionStatus ?? line.productionStatus).title)
                 statusPill("Delivery", line.deliveryStatus.title)
             }
 
@@ -1529,49 +1991,74 @@ private struct CustomOrderManagerDashboardView: View {
     @State private var statusFilter: CustomOrderManagerStatusFilter = .all
 
     var body: some View {
-        List {
-            Section("By Status") {
-                ForEach(CustomOrderStatus.allCases) { status in
-                    LabeledContent(status.title, value: "\(orders.filter { $0.status == status }.count)")
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                HStack(spacing: 12) {
+                    managerTile("Orders", "\(orders.count)", "list.clipboard", .blue)
+                    managerTile("Ready", "\(orders.filter { $0.status == .ready }.count)", "checkmark.seal", .purple)
+                    managerTile("Balance", String(format: "$%.2f", orders.reduce(0) { $0 + $1.balanceDue }), "dollarsign.circle", .orange)
                 }
-            }
-            Section("Open Balances") {
-                LabeledContent("Balance due", value: String(format: "$%.2f", orders.reduce(0) { $0 + $1.balanceDue }))
-                LabeledContent("Ready", value: "\(orders.filter { $0.status == .ready }.count)")
-            }
-            Section("Filters") {
-                Picker("Status", selection: $statusFilter) {
-                    Text("All statuses").tag(CustomOrderManagerStatusFilter.all)
-                    Text("Current orders").tag(CustomOrderManagerStatusFilter.current)
-                    ForEach(CustomOrderStatus.allCases) { status in
-                        Text(status.title).tag(CustomOrderManagerStatusFilter.status(status))
-                    }
-                }
-            }
-            Section("Location Orders") {
-                if orders.isEmpty {
-                    Text("No orders found for this location.")
-                        .foregroundStyle(.secondary)
-                } else if filteredOrders.isEmpty {
-                    Text("No orders match these filters.")
-                        .foregroundStyle(.secondary)
-                } else {
-                    ForEach(filteredOrders) { order in
-                        Button {
-                            selectedOrder = order
-                        } label: {
-                            HStack {
-                                CustomOrderRow(order: order)
-                                Spacer()
-                                Image(systemName: "chevron.right")
-                                    .font(.caption.weight(.semibold))
-                                    .foregroundStyle(.secondary)
+
+                CustomOrderCard {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("Filters")
+                            .font(.headline)
+                        Picker("Status", selection: $statusFilter) {
+                            Text("All statuses").tag(CustomOrderManagerStatusFilter.all)
+                            Text("Current orders").tag(CustomOrderManagerStatusFilter.current)
+                            ForEach(CustomOrderStatus.allCases) { status in
+                                Text(status.title).tag(CustomOrderManagerStatusFilter.status(status))
                             }
                         }
-                        .buttonStyle(.plain)
+                    }
+                }
+
+                CustomOrderCard {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("By Status")
+                            .font(.headline)
+                        ForEach(CustomOrderStatus.allCases) { status in
+                            LabeledContent(status.title, value: "\(orders.filter { $0.status == status }.count)")
+                        }
+                    }
+                }
+
+                Text("Location Orders")
+                    .font(.headline)
+
+                if orders.isEmpty {
+                    CustomOrderCard {
+                        Text("No orders found for this location.")
+                        .foregroundStyle(.secondary)
+                    }
+                } else if filteredOrders.isEmpty {
+                    CustomOrderCard {
+                        Text("No orders match these filters.")
+                            .foregroundStyle(.secondary)
+                    }
+                } else {
+                    LazyVStack(spacing: 12) {
+                        ForEach(filteredOrders) { order in
+                            Button {
+                                selectedOrder = order
+                            } label: {
+                                HStack {
+                                    CustomOrderRow(order: order)
+                                    Spacer()
+                                    Image(systemName: "chevron.right")
+                                        .font(.caption.weight(.semibold))
+                                        .foregroundStyle(.secondary)
+                                }
+                                .padding()
+                                .background(Color(.secondarySystemBackground))
+                                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                            }
+                            .buttonStyle(.plain)
+                        }
                     }
                 }
             }
+            .padding()
         }
         .navigationTitle("Orders Manager")
         .sheet(item: $selectedOrder) { order in
@@ -1592,6 +2079,26 @@ private struct CustomOrderManagerDashboardView: View {
 
     private func load() async {
         orders = (try? await service.fetchOrders(scope: .manager(locationId: sessionManager.selectedStore?.id))) ?? []
+    }
+
+    private func managerTile(_ title: String, _ value: String, _ icon: String, _ tint: Color) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Image(systemName: icon)
+                .foregroundStyle(tint)
+            Text(value)
+                .font(.headline.weight(.bold))
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+            Text(title)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding()
+        .background(
+            LinearGradient(colors: [tint.opacity(0.15), Color(.secondarySystemBackground)], startPoint: .topLeading, endPoint: .bottomTrailing)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
 }
 
@@ -1622,84 +2129,98 @@ private struct CustomOrderEndOfDayView: View {
     @State private var errorMessage: String?
 
     var body: some View {
-        List {
-            if let errorMessage {
-                Section { Text(errorMessage).foregroundStyle(.red) }
-            }
-
-            Section("Filters") {
-                Toggle("Current device only", isOn: $filterCurrentDevice)
-                Toggle("Current user only", isOn: $filterCurrentUser)
-                if let storeName = sessionManager.selectedStore?.name {
-                    LabeledContent("Location", value: storeName)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                HStack(spacing: 12) {
+                    endOfDayTile("Payments", String(format: "$%.2f", paymentTotal), "creditcard.fill", .green)
+                    endOfDayTile("Refunds", String(format: "$%.2f", refundTotal), "arrow.uturn.backward.circle.fill", .red)
+                    endOfDayTile("Payout", String(format: "$%.2f", payoutTotal), "banknote.fill", .orange)
                 }
-            }
-            .onChange(of: filterCurrentDevice) { _, _ in Task { await load() } }
-            .onChange(of: filterCurrentUser) { _, _ in Task { await load() } }
 
-            Section("Payments") {
-                ForEach(CustomOrderPaymentMethod.allCases) { method in
-                    LabeledContent(method.title, value: String(format: "$%.2f", total(for: method)))
+                if let errorMessage {
+                    Text(errorMessage)
+                        .font(.callout)
+                        .foregroundStyle(.red)
+                        .padding()
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(Color.red.opacity(0.10))
+                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                 }
-                LabeledContent("Total Payments", value: String(format: "$%.2f", paymentTotal))
-            }
 
-            Section("Refunds / Returns") {
-                LabeledContent("Refunded Amount", value: String(format: "$%.2f", refundTotal))
-                LabeledContent("Balance Reduced", value: String(format: "$%.2f", balanceReductionTotal))
-                LabeledContent("Actual Payout", value: String(format: "$%.2f", payoutTotal))
-            }
+                CustomOrderCard {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("Filters")
+                            .font(.headline)
+                        Toggle("Current device only", isOn: $filterCurrentDevice)
+                        Toggle("Current user only", isOn: $filterCurrentUser)
+                        if let storeName = sessionManager.selectedStore?.name {
+                            LabeledContent("Location", value: storeName)
+                        }
+                    }
+                }
+                .onChange(of: filterCurrentDevice) { _, _ in Task { await load() } }
+                .onChange(of: filterCurrentUser) { _, _ in Task { await load() } }
 
-            Section("Payment Transactions") {
-                if paymentTransactions.isEmpty {
-                    Text("No payments found.").foregroundStyle(.secondary)
-                } else {
-                    ForEach(paymentTransactions) { payment in
-                        VStack(alignment: .leading, spacing: 4) {
-                            HStack {
-                                Text(payment.paymentMethod.title)
-                                Spacer()
-                                Text(payment.amountText)
-                            }
+                CustomOrderCard {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("Payments")
+                            .font(.headline)
+                        ForEach(CustomOrderPaymentMethod.allCases) { method in
+                            LabeledContent(method.title, value: String(format: "$%.2f", total(for: method)))
+                        }
+                        Divider()
+                        LabeledContent("Total Payments", value: String(format: "$%.2f", paymentTotal))
                             .font(.subheadline.weight(.semibold))
-                            if let reference = payment.paymentReference, !reference.isEmpty {
-                                Text("Reference: \(reference)")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                            Text([payment.takenByName, payment.createdAt, payment.deviceName].compactMap { $0 }.joined(separator: " | "))
-                                .font(.caption)
+                    }
+                }
+
+                CustomOrderCard {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("Refunds / Returns")
+                            .font(.headline)
+                        LabeledContent("Refunded Amount", value: String(format: "$%.2f", refundTotal))
+                        LabeledContent("Balance Reduced", value: String(format: "$%.2f", balanceReductionTotal))
+                        LabeledContent("Actual Payout", value: String(format: "$%.2f", payoutTotal))
+                    }
+                }
+
+                CustomOrderCard {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("Payment Transactions")
+                            .font(.headline)
+                        if paymentTransactions.isEmpty {
+                            Text("No payments found.")
                                 .foregroundStyle(.secondary)
+                        } else {
+                            ForEach(paymentTransactions) { payment in
+                                eodPaymentRow(payment)
+                                if payment.id != paymentTransactions.last?.id {
+                                    Divider()
+                                }
+                            }
+                        }
+                    }
+                }
+
+                CustomOrderCard {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("Return / Refund Transactions")
+                            .font(.headline)
+                        if returns.isEmpty {
+                            Text("No returns or refunds found.")
+                                .foregroundStyle(.secondary)
+                        } else {
+                            ForEach(returns) { itemReturn in
+                                eodReturnRow(itemReturn)
+                                if itemReturn.id != returns.last?.id {
+                                    Divider()
+                                }
+                            }
                         }
                     }
                 }
             }
-
-            Section("Return / Refund Transactions") {
-                if returns.isEmpty {
-                    Text("No returns or refunds found.").foregroundStyle(.secondary)
-                } else {
-                    ForEach(returns) { itemReturn in
-                        VStack(alignment: .leading, spacing: 4) {
-                            HStack {
-                                Text(itemReturn.displayName)
-                                Spacer()
-                                Text(itemReturn.amountText)
-                            }
-                            .font(.subheadline.weight(.semibold))
-                            Text(itemReturn.reason)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                            Text("Balance \(itemReturn.balanceReductionText) | Payout \(itemReturn.payoutText)")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                            Text([itemReturn.createdByName, itemReturn.createdAt, itemReturn.deviceName].compactMap { $0 }.joined(separator: " | "))
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                }
-            }
+            .padding()
         }
         .navigationTitle("Orders End Of Day")
         .task { await load() }
@@ -1728,6 +2249,65 @@ private struct CustomOrderEndOfDayView: View {
 
     private func total(for method: CustomOrderPaymentMethod) -> Double {
         paymentTransactions.filter { $0.paymentMethod == method }.reduce(0) { $0 + $1.amount }
+    }
+
+    private func endOfDayTile(_ title: String, _ value: String, _ icon: String, _ tint: Color) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Image(systemName: icon)
+                .foregroundStyle(tint)
+            Text(value)
+                .font(.headline.weight(.bold))
+                .lineLimit(1)
+                .minimumScaleFactor(0.72)
+            Text(title)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding()
+        .background(
+            LinearGradient(colors: [tint.opacity(0.15), Color(.secondarySystemBackground)], startPoint: .topLeading, endPoint: .bottomTrailing)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+
+    private func eodPaymentRow(_ payment: CustomOrderPayment) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Text(payment.paymentMethod.title)
+                Spacer()
+                Text(payment.amountText)
+            }
+            .font(.subheadline.weight(.semibold))
+            if let reference = payment.paymentReference, !reference.isEmpty {
+                Text("Reference: \(reference)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Text([payment.takenByName, payment.createdAt, payment.deviceName].compactMap { $0 }.joined(separator: " | "))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private func eodReturnRow(_ itemReturn: CustomOrderEndOfDayReturn) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Text(itemReturn.displayName)
+                Spacer()
+                Text(itemReturn.amountText)
+            }
+            .font(.subheadline.weight(.semibold))
+            Text(itemReturn.reason)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Text("Balance \(itemReturn.balanceReductionText) | Payout \(itemReturn.payoutText)")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Text([itemReturn.createdByName, itemReturn.createdAt, itemReturn.deviceName].compactMap { $0 }.joined(separator: " | "))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
     }
 
     private func load() async {

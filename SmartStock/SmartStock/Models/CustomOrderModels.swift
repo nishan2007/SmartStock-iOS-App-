@@ -719,6 +719,7 @@ struct CustomOrder: Decodable, Identifiable {
     let customerPhone: String
     let status: CustomOrderStatus
     let paymentStatus: CustomOrderPaymentStatus
+    let paymentMethod: String?
     let dueDate: String?
     let orderNotes: String?
     let totalAmount: Double
@@ -759,6 +760,7 @@ struct CustomOrder: Decodable, Identifiable {
         case customerPhone = "customer_phone"
         case status
         case paymentStatus = "payment_status"
+        case paymentMethod = "payment_method"
         case dueDate = "due_date"
         case orderNotes = "order_notes"
         case totalAmount = "total_amount"
@@ -796,6 +798,7 @@ struct CustomOrder: Decodable, Identifiable {
         customerPhone = try container.decodeCustomFlexibleStringIfPresent(forKey: .customerPhone) ?? ""
         status = CustomOrderStatus(rawValue: (try container.decodeIfPresent(String.self, forKey: .status) ?? "NEW").uppercased()) ?? .new
         paymentStatus = CustomOrderPaymentStatus(rawValue: (try container.decodeIfPresent(String.self, forKey: .paymentStatus) ?? "UNPAID").uppercased()) ?? .unpaid
+        paymentMethod = try container.decodeCustomFlexibleStringIfPresent(forKey: .paymentMethod)
         dueDate = try container.decodeCustomFlexibleStringIfPresent(forKey: .dueDate)
         orderNotes = try container.decodeCustomFlexibleStringIfPresent(forKey: .orderNotes)
         totalAmount = try container.decodeCustomFlexibleDoubleIfPresent(forKey: .totalAmount) ?? 0
@@ -839,6 +842,9 @@ struct CustomOrderLine: Decodable, Identifiable {
     let originalLineTotal: Double
     let lineDiscountPercent: Double
     let lineDiscountAmount: Double
+    let printMaterialName: String?
+    let printSizeName: String?
+    let printCharge: Double?
     let lineDiscountByName: String?
     let lineDiscountReason: String?
     let lineTotal: Double
@@ -870,6 +876,7 @@ struct CustomOrderLine: Decodable, Identifiable {
     var priceText: String { String(format: "$%.2f", unitPrice) }
     var totalText: String { String(format: "$%.2f", lineTotal) }
     var displayName: String { variantName?.isEmpty == false ? "\(itemName) - \(variantName!)" : itemName }
+    var orderInstructions: String? { lineNotes }
 
     enum CodingKeys: String, CodingKey {
         case customOrderLineId = "custom_order_line_id"
@@ -885,6 +892,9 @@ struct CustomOrderLine: Decodable, Identifiable {
         case originalLineTotal = "original_line_total"
         case lineDiscountPercent = "line_discount_percent"
         case lineDiscountAmount = "line_discount_amount"
+        case printMaterialName = "print_material_name"
+        case printSizeName = "print_size_name"
+        case printCharge = "print_charge"
         case lineDiscountByName = "line_discount_by_name"
         case lineDiscountReason = "line_discount_reason"
         case lineTotal = "line_total"
@@ -917,7 +927,7 @@ struct CustomOrderLine: Decodable, Identifiable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         customOrderLineId = try container.decodeCustomFlexibleInt64(forKey: .customOrderLineId)
         customOrderId = try container.decodeCustomFlexibleInt64IfPresent(forKey: .customOrderId)
-        customItemId = try container.decodeCustomFlexibleInt64(forKey: .customItemId)
+        customItemId = try container.decodeCustomFlexibleInt64IfPresent(forKey: .customItemId) ?? 0
         variantId = try container.decodeCustomFlexibleInt64IfPresent(forKey: .variantId)
         itemName = try container.decodeIfPresent(String.self, forKey: .itemName) ?? "Custom Item"
         variantName = try container.decodeCustomFlexibleStringIfPresent(forKey: .variantName)
@@ -928,6 +938,9 @@ struct CustomOrderLine: Decodable, Identifiable {
         originalLineTotal = try container.decodeCustomFlexibleDoubleIfPresent(forKey: .originalLineTotal) ?? unitPrice * quantity
         lineDiscountPercent = try container.decodeCustomFlexibleDoubleIfPresent(forKey: .lineDiscountPercent) ?? 0
         lineDiscountAmount = try container.decodeCustomFlexibleDoubleIfPresent(forKey: .lineDiscountAmount) ?? 0
+        printMaterialName = try container.decodeCustomFlexibleStringIfPresent(forKey: .printMaterialName)
+        printSizeName = try container.decodeCustomFlexibleStringIfPresent(forKey: .printSizeName)
+        printCharge = try container.decodeCustomFlexibleDoubleIfPresent(forKey: .printCharge)
         lineDiscountByName = try container.decodeCustomFlexibleStringIfPresent(forKey: .lineDiscountByName)
         lineDiscountReason = try container.decodeCustomFlexibleStringIfPresent(forKey: .lineDiscountReason)
         lineTotal = try container.decodeCustomFlexibleDoubleIfPresent(forKey: .lineTotal) ?? originalLineTotal - lineDiscountAmount

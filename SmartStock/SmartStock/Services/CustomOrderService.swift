@@ -479,6 +479,29 @@ struct CustomOrderService {
         }
     }
 
+    func fetchRecentLookupOrders(query: String, locationId: Int?, daysBack: Int = 30) async throws -> [CustomOrder] {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return [] }
+
+        let sinceDate = Calendar.current.date(byAdding: .day, value: -daysBack, to: Date()) ?? Date()
+        let sinceValue = ISO8601DateFormatter().string(from: sinceDate)
+
+        var request = client
+            .from("custom_orders")
+            .select(orderSelection)
+            .or("order_number.ilike.%\(trimmed)%,customer_name.ilike.%\(trimmed)%,customer_phone.ilike.%\(trimmed)%")
+            .gte("created_at", value: sinceValue)
+
+        if let locationId {
+            request = request.eq("location_id", value: locationId)
+        }
+
+        return try await request
+            .order("created_at", ascending: false)
+            .execute()
+            .value
+    }
+
     func fetchAuditLog(orderId: Int64) async throws -> [CustomOrderAuditEntry] {
         try await client
             .from("custom_order_audit_log")
@@ -639,12 +662,37 @@ struct CustomOrderService {
         }
 
         if let paymentMethod, paid > 0 {
-            _ = try await client.from("custom_order_payments").insert(CustomOrderPaymentInsert(custom_order_id: insertedOrder.custom_order_id, payment_amount: paid, payment_method: paymentMethod.rawValue, payment_reference: normalized(paymentReference), taken_by_user_id: user.id, taken_by_name: user.fullName, payment_action: "PAYMENT", device_id: device?.id.uuidString, device_name: device?.deviceName ?? device?.modelName)).execute()
+            let paymentId = try await recordCustomOrderPayment(
+                orderId: insertedOrder.custom_order_id,
+                amount: paid,
+                method: paymentMethod,
+                reference: paymentReference,
+                user: user,
+                device: device
+            )
+            try await recordCustomOrderPaymentLedger(
+                customerId: resolvedCustomer.customerId,
+                orderId: insertedOrder.custom_order_id,
+                amount: paid,
+                paymentId: paymentId,
+                note: "Custom order payment. payment_method=\(paymentMethod.rawValue), custom_order_id=\(insertedOrder.custom_order_id), order_number=\(insertedOrder.order_number)",
+                user: user,
+                store: store,
+                device: device
+            )
             try await writeAudit(orderId: insertedOrder.custom_order_id, action: "ADD_PAYMENT", fieldName: "amount_paid", oldValue: "0.00", newValue: String(format: "%.2f", paid), reason: paymentMethod.title, user: user, device: device)
         }
 
-        if paymentMethod == .account && balanceDue > 0 {
-            try await recordAccountBalance(customerId: resolvedCustomer.customerId, orderId: insertedOrder.custom_order_id, amount: balanceDue, note: "Custom order balance \(insertedOrder.custom_order_id)", user: user, store: store, device: device)
+        if balanceDue > 0 {
+            try await chargeCustomOrderBalanceToAccount(
+                customerId: resolvedCustomer.customerId,
+                orderId: insertedOrder.custom_order_id,
+                amount: balanceDue,
+                note: "Custom order balance charged to account. custom_order_id=\(insertedOrder.custom_order_id), order_number=\(insertedOrder.order_number)",
+                user: user,
+                store: store,
+                device: device
+            )
             try await writeAudit(orderId: insertedOrder.custom_order_id, action: "ACCOUNT_CHARGE", fieldName: "balance_due", oldValue: nil, newValue: String(format: "%.2f", balanceDue), reason: "Charged to customer account", user: user, device: device)
         }
 
@@ -746,7 +794,7 @@ struct CustomOrderService {
                 taken_by_user_id: user.id,
                 taken_by_name: user.fullName
             ))
-            .select("custom_order_id")
+            .select("custom_order_id, order_number")
             .single()
             .execute()
             .value
@@ -773,10 +821,11 @@ struct CustomOrderService {
         }
     }
 
-    func updateLineProduction(order: CustomOrder, line: CustomOrderLine, status: CustomOrderProductionStatus, notes: String?, user: AppUser, device: TrackedDevice?) async throws {
+    func updateLineProduction(order: CustomOrder, line: CustomOrderLine, status: CustomOrderProductionStatus, oldStatus: CustomOrderProductionStatus? = nil, notes: String?, user: AppUser, device: TrackedDevice?) async throws {
+        let previousStatus = oldStatus ?? line.productionStatus
         _ = try await client.from("custom_order_lines").update(CustomOrderLineProductionUpdate(production_status: status.rawValue, production_updated_at: ISO8601DateFormatter().string(from: Date()), production_updated_by_user_id: user.id, production_updated_by_name: user.fullName)).eq("custom_order_line_id", value: String(line.customOrderLineId)).execute()
-        _ = try await client.from("custom_order_line_production_history").insert(CustomOrderLineProductionHistoryInsert(custom_order_id: order.customOrderId, custom_order_line_id: line.customOrderLineId, custom_item_id: line.customItemId, custom_variant_id: line.variantId, item_name: line.itemName, variant_name: line.variantName, old_status: line.productionStatus.rawValue, new_status: status.rawValue, notes: normalized(notes), updated_by_user_id: user.id, updated_by_name: user.fullName, device_id: device?.id.uuidString, device_name: device?.deviceName ?? device?.modelName)).execute()
-        try await writeAudit(orderId: order.customOrderId, action: "PRODUCTION_UPDATE", fieldName: "production_status", oldValue: line.productionStatus.rawValue, newValue: status.rawValue, reason: normalized(notes), user: user, device: device)
+        _ = try await client.from("custom_order_line_production_history").insert(CustomOrderLineProductionHistoryInsert(custom_order_id: order.customOrderId, custom_order_line_id: line.customOrderLineId, custom_item_id: line.customItemId, custom_variant_id: line.variantId, item_name: line.itemName, variant_name: line.variantName, old_status: previousStatus.rawValue, new_status: status.rawValue, notes: normalized(notes), updated_by_user_id: user.id, updated_by_name: user.fullName, device_id: device?.id.uuidString, device_name: device?.deviceName ?? device?.modelName)).execute()
+        try await writeAudit(orderId: order.customOrderId, action: "PRODUCTION_UPDATE", fieldName: "production_status", oldValue: previousStatus.rawValue, newValue: status.rawValue, reason: normalized(notes), user: user, device: device)
     }
 
     func deliverLine(order: CustomOrder, line: CustomOrderLine, notes: String?, user: AppUser, device: TrackedDevice?) async throws {
@@ -824,8 +873,15 @@ struct CustomOrderService {
         guard amount > 0 else { throw CustomOrderServiceError.invalidPaymentAmount }
         if method.requiresReference, normalized(reference) == nil { throw CustomOrderServiceError.paymentReferenceRequired }
 
-        let paidAmount = min(amount, max(order.balanceDue, amount))
-        _ = try await client.from("custom_order_payments").insert(CustomOrderPaymentInsert(custom_order_id: order.customOrderId, payment_amount: paidAmount, payment_method: method.rawValue, payment_reference: normalized(reference), taken_by_user_id: user.id, taken_by_name: user.fullName, payment_action: "PAYMENT", device_id: device?.id.uuidString, device_name: device?.deviceName ?? device?.modelName)).execute()
+        let paidAmount = min(amount, order.balanceDue)
+        let paymentId = try await recordCustomOrderPayment(
+            orderId: order.customOrderId,
+            amount: paidAmount,
+            method: method,
+            reference: reference,
+            user: user,
+            device: device
+        )
 
         let nextPaid = order.amountPaid + paidAmount
         let nextBalance = max(order.balanceDue - paidAmount, 0)
@@ -837,9 +893,19 @@ struct CustomOrderService {
             .execute()
 
         if method == .account {
-            try await recordAccountBalance(customerId: order.customerId, orderId: order.customOrderId, amount: paidAmount, note: "Custom order account charge \(order.displayNumber)", user: user, store: store, device: device)
+            try await chargeCustomOrderBalanceToAccount(customerId: order.customerId, orderId: order.customOrderId, amount: paidAmount, note: "Custom order account charge \(order.displayNumber)", user: user, store: store, device: device)
             try await writeAudit(orderId: order.customOrderId, action: "ACCOUNT_CHARGE", fieldName: "balance_due", oldValue: String(format: "%.2f", order.balanceDue), newValue: String(format: "%.2f", nextBalance), reason: "Post-order account charge", user: user, device: device)
         } else {
+            try await recordCustomOrderPaymentLedger(
+                customerId: order.customerId,
+                orderId: order.customOrderId,
+                amount: paidAmount,
+                paymentId: paymentId,
+                note: "Custom order payment. payment_method=\(method.rawValue), custom_order_id=\(order.customOrderId), order_number=\(order.displayNumber)",
+                user: user,
+                store: store,
+                device: device
+            )
             try await writeAudit(orderId: order.customOrderId, action: "ADD_PAYMENT", fieldName: "amount_paid", oldValue: String(format: "%.2f", order.amountPaid), newValue: String(format: "%.2f", nextPaid), reason: method.title, user: user, device: device)
         }
     }
@@ -957,8 +1023,62 @@ struct CustomOrderService {
         """
     }
 
-    private func recordAccountBalance(customerId: Int, orderId: Int64, amount: Double, note: String?, user: AppUser, store: Store?, device: TrackedDevice?) async throws {
-        _ = try await client.from("customer_account_transactions").insert(CustomerAccountTransactionInsert(customer_id: customerId, sale_id: nil, amount: amount, transaction_type: "CUSTOM_ORDER_CREDIT", note: normalized(note), payment_id: nil, user_name: user.fullName, location_id: store?.id, custom_order_id: orderId, device_id: device?.id.uuidString, device_name: device?.deviceName ?? device?.modelName)).execute()
+    @discardableResult
+    private func recordCustomOrderPayment(
+        orderId: Int64,
+        amount: Double,
+        method: CustomOrderPaymentMethod,
+        reference: String?,
+        user: AppUser,
+        device: TrackedDevice?
+    ) async throws -> String {
+        let inserted: CustomOrderPaymentIdRow = try await client
+            .from("custom_order_payments")
+            .insert(CustomOrderPaymentInsert(custom_order_id: orderId, payment_amount: amount, payment_method: method.rawValue, payment_reference: normalized(reference), taken_by_user_id: user.id, taken_by_name: user.fullName, payment_action: "PAYMENT", device_id: device?.id.uuidString, device_name: device?.deviceName ?? device?.modelName))
+            .select("custom_order_payment_id")
+            .single()
+            .execute()
+            .value
+
+        return String(format: "COP-%06lld", inserted.custom_order_payment_id)
+    }
+
+    private func recordCustomOrderPaymentLedger(
+        customerId: Int,
+        orderId: Int64,
+        amount: Double,
+        paymentId: String,
+        note: String?,
+        user: AppUser,
+        store: Store?,
+        device: TrackedDevice?
+    ) async throws {
+        _ = try await client.from("customer_account_transactions").insert(CustomerAccountTransactionInsert(customer_id: customerId, sale_id: nil, amount: amount, transaction_type: "CUSTOM_ORDER_PAID", note: normalized(note), payment_id: paymentId, user_name: user.fullName, location_id: store?.id, custom_order_id: orderId, device_id: device?.id.uuidString, device_name: device?.deviceName ?? device?.modelName)).execute()
+    }
+
+    private func chargeCustomOrderBalanceToAccount(customerId: Int, orderId: Int64, amount: Double, note: String?, user: AppUser, store: Store?, device: TrackedDevice?) async throws {
+        let rows: [ChargeCustomOrderBalanceResult] = try await client
+            .rpc(
+                "charge_custom_order_balance_to_account",
+                params: ChargeCustomOrderBalanceParams(
+                    target_customer_id: customerId,
+                    target_custom_order_id: orderId,
+                    target_amount: amount,
+                    target_note: normalized(note),
+                    target_user_name: user.fullName,
+                    target_location_id: store?.id,
+                    target_device_id: device?.id.uuidString,
+                    target_device_name: device?.deviceName ?? device?.modelName
+                )
+            )
+            .execute()
+            .value
+
+        guard !rows.isEmpty else {
+            throw NSError(domain: "CustomOrderService", code: 2, userInfo: [
+                NSLocalizedDescriptionKey: "The custom order balance was not charged to the customer account."
+            ])
+        }
     }
 
     private func writeAudit(orderId: Int64, action: String, fieldName: String?, oldValue: String?, newValue: String?, reason: String?, user: AppUser, device: TrackedDevice?) async throws {
@@ -1316,8 +1436,12 @@ private struct CustomOrderInsert: Encodable {
     let taken_by_name: String
 }
 
-private struct CustomOrderIdRow: Decodable { let custom_order_id: Int64 }
+private struct CustomOrderIdRow: Decodable {
+    let custom_order_id: Int64
+    let order_number: String
+}
 private struct CustomOrderLineIdRow: Decodable { let custom_order_line_id: Int64 }
+private struct CustomOrderPaymentIdRow: Decodable { let custom_order_payment_id: Int64 }
 
 private struct CustomOrderLineInsertSeed {
     let line: CustomOrderDraftLine
@@ -1429,6 +1553,22 @@ private struct CustomerAccountTransactionInsert: Encodable {
     let custom_order_id: Int64
     let device_id: String?
     let device_name: String?
+}
+
+private struct ChargeCustomOrderBalanceParams: Encodable {
+    let target_customer_id: Int
+    let target_custom_order_id: Int64
+    let target_amount: Double
+    let target_note: String?
+    let target_user_name: String
+    let target_location_id: Int?
+    let target_device_id: String?
+    let target_device_name: String?
+}
+
+private struct ChargeCustomOrderBalanceResult: Decodable {
+    let account_transaction_id: Int
+    let new_balance: Double
 }
 
 private struct CustomOrderAssignmentUpdate: Encodable {

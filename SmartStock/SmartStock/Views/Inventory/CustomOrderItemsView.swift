@@ -47,6 +47,8 @@ struct CustomOrderItemsView: View {
     @State private var editingMaterial: CustomOrderPrintMaterial?
     @State private var isShowingAddItem = false
     @State private var isShowingAddMaterial = false
+    @State private var isShowingScanner = false
+    @State private var isShowingFilters = false
 
     var body: some View {
         Group {
@@ -61,13 +63,6 @@ struct CustomOrderItemsView: View {
                         Picker("Management Screen", selection: $selectedScreen) {
                             ForEach(ManagementScreen.allCases) { screen in
                                 Text(screen.rawValue).tag(screen)
-                            }
-                        }
-                        .pickerStyle(.segmented)
-
-                        Picker("Show", selection: $statusFilter) {
-                            ForEach(SetupStatusFilter.allCases) { filter in
-                                Text(filter.rawValue).tag(filter)
                             }
                         }
                         .pickerStyle(.segmented)
@@ -99,21 +94,59 @@ struct CustomOrderItemsView: View {
         .navigationBarTitleDisplayMode(.inline)
         .searchable(text: $searchText, prompt: selectedScreen == .items ? "Search custom items" : "Search print materials")
         .toolbar {
-            if selectedScreen == .items && canManageCustomItems {
+            ToolbarItemGroup(placement: .topBarTrailing) {
                 Button {
-                    isShowingAddItem = true
+                    isShowingFilters = true
                 } label: {
-                    Image(systemName: "plus.circle.fill")
+                    Image(systemName: activeFilterCount == 0 ? "line.3.horizontal.decrease.circle" : "line.3.horizontal.decrease.circle.fill")
+                        .font(.title3)
+                        .symbolRenderingMode(.hierarchical)
+                        .frame(width: 34, height: 34)
+                        .background(Color(.secondarySystemBackground))
+                        .clipShape(Circle())
                 }
-                .accessibilityLabel("Add custom order item")
-            } else if selectedScreen == .printMaterials && canManagePrintMaterials {
-                Button {
-                    isShowingAddMaterial = true
-                } label: {
-                    Image(systemName: "plus.circle.fill")
+                .accessibilityLabel("Custom order item filters")
+
+                if selectedScreen == .items {
+                    Button {
+                        isShowingScanner = true
+                    } label: {
+                        Image(systemName: "barcode.viewfinder")
+                    }
+                    .accessibilityLabel("Scan custom item barcode")
                 }
-                .accessibilityLabel("Add print material")
+
+                if selectedScreen == .items && canManageCustomItems {
+                    Button {
+                        isShowingAddItem = true
+                    } label: {
+                        Image(systemName: "plus.circle.fill")
+                    }
+                    .accessibilityLabel("Add custom order item")
+                } else if selectedScreen == .printMaterials && canManagePrintMaterials {
+                    Button {
+                        isShowingAddMaterial = true
+                    } label: {
+                        Image(systemName: "plus.circle.fill")
+                    }
+                    .accessibilityLabel("Add print material")
+                }
             }
+        }
+        .sheet(isPresented: $isShowingScanner) {
+            BarcodeScannerSheet(
+                scannedCode: $searchText,
+                isPresented: $isShowingScanner,
+                onScanned: { code in
+                    searchText = code.trimmingCharacters(in: .whitespacesAndNewlines)
+                }
+            )
+        }
+        .sheet(isPresented: $isShowingFilters) {
+            NavigationStack {
+                customOrderFiltersSheet
+            }
+            .presentationDetents([.medium])
         }
         .sheet(isPresented: $isShowingAddItem) {
             CustomOrderItemFormView(item: nil) {
@@ -260,6 +293,10 @@ struct CustomOrderItemsView: View {
         || sessionManager.currentUser?.canAccess(.customOrderItems) == true
     }
 
+    private var activeFilterCount: Int {
+        statusFilter == .active ? 0 : 1
+    }
+
     private var activeListIsEmpty: Bool {
         selectedScreen == .items ? items.isEmpty : materials.isEmpty
     }
@@ -318,6 +355,40 @@ struct CustomOrderItemsView: View {
         case .area:
             return .purple
         }
+    }
+
+    private var customOrderFiltersSheet: some View {
+        List {
+            Section("Status") {
+                Picker("Show", selection: $statusFilter) {
+                    ForEach(SetupStatusFilter.allCases) { filter in
+                        Text(filter.rawValue).tag(filter)
+                    }
+                }
+            }
+
+            Section {
+                Button {
+                    resetFilters()
+                } label: {
+                    Label("Reset Filters", systemImage: "arrow.counterclockwise")
+                }
+                .disabled(activeFilterCount == 0)
+            }
+        }
+        .navigationTitle("Filters")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .confirmationAction) {
+                Button("Done") {
+                    isShowingFilters = false
+                }
+            }
+        }
+    }
+
+    private func resetFilters() {
+        statusFilter = .active
     }
 
     private func loadItems() async {

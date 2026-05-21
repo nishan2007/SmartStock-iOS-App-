@@ -72,17 +72,18 @@ struct CustomerPaymentHistoryView: View {
                             }
 
                             if payment.customerAccountPaymentAllocations.isEmpty {
-                                Text("No sale allocations")
+                                Text("No account item allocations")
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                             } else {
                                 ForEach(payment.customerAccountPaymentAllocations) { allocation in
                                     HStack {
                                         VStack(alignment: .leading, spacing: 2) {
-                                            Text("Sale #\(allocation.saleId)")
+                                            Text(allocation.sourceText)
                                                 .font(.subheadline.weight(.semibold))
 
-                                            if let paymentStatus = nonEmpty(allocation.sales?.paymentStatus) {
+                                            let paymentStatus = allocation.customOrders?.paymentStatus ?? allocation.sales?.paymentStatus
+                                            if let paymentStatus = nonEmpty(paymentStatus) {
                                                 Text(paymentStatus.capitalized)
                                                     .font(.caption)
                                                     .foregroundStyle(.secondary)

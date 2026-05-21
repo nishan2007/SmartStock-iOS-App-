@@ -44,6 +44,7 @@ struct ReturnsView: View {
     @State private var receiptItems: [ReturnableSaleItem] = []
     @State private var selectedSaleItemId: Int?
     @State private var customOrderQuery = ""
+    @State private var customOrderResults: [CustomOrder] = []
     @State private var loadedCustomOrder: CustomOrder?
     @State private var selectedCustomOrderLineId: Int64?
     @State private var customRefundAmount = ""
@@ -81,7 +82,7 @@ struct ReturnsView: View {
                 } else {
                     customOrderLookupCard
 
-                    if loadedCustomOrder != nil {
+                    if !customOrderResults.isEmpty {
                         customOrderReturnWorkflowPanel
                     }
                 }
@@ -240,18 +241,26 @@ struct ReturnsView: View {
     private var customOrderReturnWorkflowPanel: some View {
         VStack(alignment: .leading, spacing: 18) {
             if let loadedCustomOrder {
+                if customOrderResults.count > 1 {
+                    customOrderBackToResultsButton
+
+                    Divider()
+                }
+
                 customOrderSummarySection(for: loadedCustomOrder)
-            }
 
-            Divider()
-
-            customOrderLinesSection
-
-            if selectedCustomOrderLine != nil {
                 Divider()
-                customOrderReturnOptionsSection
-                Divider()
-                customOrderSubmitSection
+
+                customOrderLinesSection
+
+                if selectedCustomOrderLine != nil {
+                    Divider()
+                    customOrderReturnOptionsSection
+                    Divider()
+                    customOrderSubmitSection
+                }
+            } else {
+                customOrderResultsSection
             }
         }
         .padding(18)
@@ -348,7 +357,7 @@ struct ReturnsView: View {
 
     private var customOrderLinesSection: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("Custom Order Lines")
+            Text("Order Lines")
                 .font(.headline)
 
             VStack(spacing: 10) {
@@ -357,6 +366,91 @@ struct ReturnsView: View {
                 }
             }
         }
+    }
+
+    private var customOrderBackToResultsButton: some View {
+        Button {
+            loadedCustomOrder = nil
+            selectedCustomOrderLineId = nil
+            customRefundAmount = ""
+            errorMessage = nil
+        } label: {
+            Label("Orders", systemImage: "chevron.left")
+                .font(.subheadline.weight(.semibold))
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(Color.accentColor)
+    }
+
+    private var customOrderResultsSection: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("Recent Custom Orders")
+                    .font(.headline)
+
+                Spacer()
+
+                Text("\(customOrderResults.count) in last 30 days")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+            }
+
+            VStack(spacing: 10) {
+                ForEach(customOrderResults) { order in
+                    customOrderResultRow(order)
+                }
+            }
+        }
+    }
+
+    private func customOrderResultRow(_ order: CustomOrder) -> some View {
+        Button {
+            selectCustomOrder(order)
+        } label: {
+            HStack(alignment: .top, spacing: 14) {
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(order.displayNumber)
+                        .font(.headline)
+                        .foregroundStyle(.primary)
+
+                    Text("\(order.customerName) \(order.customerPhone)")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+
+                    Text(customOrderCreatedText(for: order))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer(minLength: 8)
+
+                VStack(alignment: .trailing, spacing: 5) {
+                    Text(order.totalText)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.primary)
+
+                    Text("\(order.lines.count) line\(order.lines.count == 1 ? "" : "s")")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    Image(systemName: "chevron.right")
+                        .font(.title3)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .fill(Color.white.opacity(0.16))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .stroke(Color.black.opacity(0.18), lineWidth: 1.5)
+            )
+        }
+        .buttonStyle(.plain)
     }
 
     private func customOrderLineRow(_ line: CustomOrderLine) -> some View {
@@ -745,6 +839,10 @@ struct ReturnsView: View {
         loadedSale = nil
         receiptItems = []
         selectedSaleItemId = nil
+        customOrderResults = []
+        loadedCustomOrder = nil
+        selectedCustomOrderLineId = nil
+        customRefundAmount = ""
         defer { isLoadingReceipt = false }
 
         do {
@@ -770,25 +868,37 @@ struct ReturnsView: View {
         isLoadingReceipt = true
         errorMessage = nil
         successMessage = nil
+        customOrderResults = []
         loadedCustomOrder = nil
         selectedCustomOrderLineId = nil
         customRefundAmount = ""
         defer { isLoadingReceipt = false }
 
         do {
-            let orders = try await customOrderService.fetchOrders(scope: .lookup(customOrderQuery))
-            guard let order = orders.first(where: { $0.locationId == store.id }) else {
-                errorMessage = "No custom order found for this store."
+            let orders = try await customOrderService.fetchRecentLookupOrders(query: customOrderQuery, locationId: store.id)
+            guard !orders.isEmpty else {
+                errorMessage = "No custom orders found for this store in the last 30 days."
                 return
             }
 
-            loadedCustomOrder = order
-            if let firstReturnableLine = order.lines.first(where: { customOrderRemainingRefundAmount(for: $0) > 0 }) {
-                selectedCustomOrderLineId = firstReturnableLine.customOrderLineId
-                customRefundAmount = String(format: "%.2f", customOrderRemainingRefundAmount(for: firstReturnableLine))
+            customOrderResults = orders
+            if orders.count == 1 {
+                selectCustomOrder(orders[0])
             }
         } catch {
             errorMessage = error.localizedDescription
+        }
+    }
+
+    private func selectCustomOrder(_ order: CustomOrder) {
+        loadedCustomOrder = order
+        selectedCustomOrderLineId = nil
+        customRefundAmount = ""
+        errorMessage = nil
+
+        if let firstReturnableLine = order.lines.first(where: { customOrderRemainingRefundAmount(for: $0) > 0 }) {
+            selectedCustomOrderLineId = firstReturnableLine.customOrderLineId
+            customRefundAmount = String(format: "%.2f", customOrderRemainingRefundAmount(for: firstReturnableLine))
         }
     }
 
@@ -945,6 +1055,21 @@ struct ReturnsView: View {
     private func customOrderRemainingRefundAmount(for line: CustomOrderLine) -> Double {
         max(line.lineTotal - line.returns.reduce(0) { $0 + $1.refundAmount }, 0)
     }
+
+    private func customOrderCreatedText(for order: CustomOrder) -> String {
+        guard let date = Sale.parseDate(order.createdAt) else {
+            return "Recent order"
+        }
+
+        return "Created \(Self.customOrderResultDateFormatter.string(from: date))"
+    }
+
+    private static let customOrderResultDateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .short
+        return formatter
+    }()
 }
 
 private extension ReturnableSaleItem {

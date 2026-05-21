@@ -7,6 +7,7 @@ import Foundation
 import Supabase
 
 struct CustomerAccountTransactionSaleSummary: Decodable {
+    let receiptNumber: String?
     let paymentStatus: String?
     let totalAmount: Double?
     let amountPaid: Double?
@@ -14,6 +15,7 @@ struct CustomerAccountTransactionSaleSummary: Decodable {
     let createdAt: String?
 
     enum CodingKeys: String, CodingKey {
+        case receiptNumber = "receipt_number"
         case paymentStatus = "payment_status"
         case totalAmount = "total_amount"
         case amountPaid = "amount_paid"
@@ -22,10 +24,27 @@ struct CustomerAccountTransactionSaleSummary: Decodable {
     }
 }
 
+struct CustomerAccountTransactionCustomOrderSummary: Decodable {
+    let orderNumber: String?
+    let totalAmount: Double?
+    let amountPaid: Double?
+    let balanceDue: Double?
+    let paymentStatus: String?
+
+    enum CodingKeys: String, CodingKey {
+        case orderNumber = "order_number"
+        case totalAmount = "total_amount"
+        case amountPaid = "amount_paid"
+        case balanceDue = "balance_due"
+        case paymentStatus = "payment_status"
+    }
+}
+
 struct CustomerAccountTransactionEntry: Decodable, Identifiable {
     let transactionId: Int
     let customerId: Int
     let saleId: Int?
+    let customOrderId: Int64?
     let amount: Double
     let transactionType: String
     let note: String?
@@ -33,6 +52,7 @@ struct CustomerAccountTransactionEntry: Decodable, Identifiable {
     let paymentId: String?
     let userName: String?
     let sales: CustomerAccountTransactionSaleSummary?
+    let customOrders: CustomerAccountTransactionCustomOrderSummary?
 
     var id: Int { transactionId }
 
@@ -55,10 +75,25 @@ struct CustomerAccountTransactionEntry: Decodable, Identifiable {
         }
     }
 
+    var sourceText: String {
+        if customOrderId != nil {
+            let number = customOrders?.orderNumber?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            return "Custom Order \(number.isEmpty ? "#\(customOrderId ?? 0)" : number)"
+        }
+
+        if saleId != nil {
+            let receipt = sales?.receiptNumber?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            return "Sale \(receipt.isEmpty ? "#\(saleId ?? 0)" : receipt)"
+        }
+
+        return "Account"
+    }
+
     enum CodingKeys: String, CodingKey {
         case transactionId = "transaction_id"
         case customerId = "customer_id"
         case saleId = "sale_id"
+        case customOrderId = "custom_order_id"
         case amount
         case transactionType = "transaction_type"
         case note
@@ -66,6 +101,7 @@ struct CustomerAccountTransactionEntry: Decodable, Identifiable {
         case paymentId = "payment_id"
         case userName = "user_name"
         case sales
+        case customOrders = "custom_orders"
     }
 }
 
@@ -85,9 +121,11 @@ struct CustomerPaymentAllocationSaleSummary: Decodable {
 
 struct CustomerPaymentAllocation: Decodable, Identifiable {
     let allocationId: Int
-    let saleId: Int
+    let saleId: Int?
+    let customOrderId: Int64?
     let amount: Double
     let sales: CustomerPaymentAllocationSaleSummary?
+    let customOrders: CustomerAccountTransactionCustomOrderSummary?
 
     var id: Int { allocationId }
 
@@ -95,11 +133,26 @@ struct CustomerPaymentAllocation: Decodable, Identifiable {
         String(format: "$%.2f", amount)
     }
 
+    var sourceText: String {
+        if let customOrderId {
+            let number = customOrders?.orderNumber?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            return "Custom Order \(number.isEmpty ? "#\(customOrderId)" : number)"
+        }
+
+        if let saleId {
+            return "Sale #\(saleId)"
+        }
+
+        return "Account"
+    }
+
     enum CodingKeys: String, CodingKey {
         case allocationId = "allocation_id"
         case saleId = "sale_id"
+        case customOrderId = "custom_order_id"
         case amount
         case sales
+        case customOrders = "custom_orders"
     }
 }
 
@@ -170,6 +223,87 @@ struct CustomerOutstandingSale: Decodable, Identifiable {
     }
 }
 
+struct CustomerOutstandingCustomOrder: Decodable, Identifiable {
+    let customOrderId: Int64
+    let orderNumber: String?
+    let totalAmount: Double?
+    let amountPaid: Double?
+    let balanceDue: Double?
+    let paymentStatus: String?
+    let createdAt: String?
+
+    var id: Int64 { customOrderId }
+
+    var displayNumber: String {
+        let trimmed = orderNumber?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return trimmed.isEmpty ? "Custom #\(customOrderId)" : trimmed
+    }
+
+    var balanceDueText: String {
+        String(format: "$%.2f", balanceDue ?? 0)
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case customOrderId = "custom_order_id"
+        case orderNumber = "order_number"
+        case totalAmount = "total_amount"
+        case amountPaid = "amount_paid"
+        case balanceDue = "balance_due"
+        case paymentStatus = "payment_status"
+        case createdAt = "created_at"
+    }
+}
+
+enum CustomerOutstandingAccountItem: Identifiable {
+    case sale(CustomerOutstandingSale)
+    case customOrder(CustomerOutstandingCustomOrder)
+
+    var id: String {
+        switch self {
+        case .sale(let sale):
+            return "sale-\(sale.saleId)"
+        case .customOrder(let order):
+            return "custom-order-\(order.customOrderId)"
+        }
+    }
+
+    var title: String {
+        switch self {
+        case .sale(let sale):
+            return "Sale #\(sale.saleId)"
+        case .customOrder(let order):
+            return "Custom Order \(order.displayNumber)"
+        }
+    }
+
+    var createdAt: String? {
+        switch self {
+        case .sale(let sale):
+            return sale.createdAt
+        case .customOrder(let order):
+            return order.createdAt
+        }
+    }
+
+    var balanceDue: Double {
+        switch self {
+        case .sale(let sale):
+            return sale.balanceDue
+        case .customOrder(let order):
+            return max(order.balanceDue ?? 0, 0)
+        }
+    }
+
+    var totalText: String {
+        switch self {
+        case .sale(let sale):
+            return String(format: "$%.2f", sale.netTotal)
+        case .customOrder(let order):
+            return String(format: "$%.2f", order.totalAmount ?? 0)
+        }
+    }
+}
+
 struct RecordCustomerPaymentResult: Decodable {
     let paymentTransactionId: Int
     let paymentId: String
@@ -218,7 +352,7 @@ enum CustomerAccountService {
     static func fetchTransactions(customerId: Int) async throws -> [CustomerAccountTransactionEntry] {
         try await supabase
             .from("customer_account_transactions")
-            .select("transaction_id, customer_id, sale_id, amount, transaction_type, note, created_at, payment_id, user_name, sales(payment_status, total_amount, amount_paid, returned_amount, created_at)")
+            .select("transaction_id, customer_id, sale_id, custom_order_id, amount, transaction_type, note, created_at, payment_id, user_name, sales(receipt_number, payment_status, total_amount, amount_paid, returned_amount, created_at), custom_orders(order_number, total_amount, amount_paid, balance_due, payment_status)")
             .eq("customer_id", value: customerId)
             .order("created_at", ascending: false)
             .order("transaction_id", ascending: false)
@@ -229,7 +363,7 @@ enum CustomerAccountService {
     static func fetchPaymentHistory(customerId: Int) async throws -> [CustomerPaymentHistoryEntry] {
         try await supabase
             .from("customer_account_transactions")
-            .select("transaction_id, payment_id, created_at, user_name, amount, note, customer_account_payment_allocations(allocation_id, sale_id, amount, sales(total_amount, amount_paid, payment_status, created_at))")
+            .select("transaction_id, payment_id, created_at, user_name, amount, note, customer_account_payment_allocations(allocation_id, sale_id, custom_order_id, amount, sales(total_amount, amount_paid, payment_status, created_at), custom_orders(order_number, total_amount, amount_paid, balance_due, payment_status))")
             .eq("customer_id", value: customerId)
             .eq("transaction_type", value: "PAYMENT")
             .order("created_at", ascending: false)
@@ -249,6 +383,102 @@ enum CustomerAccountService {
             .order("sale_id", ascending: true)
             .execute()
             .value
+    }
+
+    static func fetchCustomOrders(customerId: Int) async throws -> [CustomOrder] {
+        try await supabase
+            .from("custom_orders")
+            .select("""
+                custom_order_id,
+                order_number,
+                customer_id,
+                customer_name,
+                customer_phone,
+                status,
+                due_date,
+                total_amount,
+                amount_paid,
+                balance_due,
+                payment_method,
+                payment_status,
+                created_at
+            """)
+            .eq("customer_id", value: customerId)
+            .order("created_at", ascending: false)
+            .execute()
+            .value
+    }
+
+    static func fetchCustomOrderLines(customOrderId: Int64) async throws -> [CustomOrderLine] {
+        try await supabase
+            .from("custom_order_lines")
+            .select("""
+                custom_order_line_id,
+                item_name,
+                variant_name,
+                pricing_type,
+                unit_price,
+                line_total,
+                customization_details,
+                order_instructions,
+                print_material_name,
+                print_size_name,
+                print_charge,
+                line_discount_amount,
+                line_discount_percent
+            """)
+            .eq("custom_order_id", value: String(customOrderId))
+            .order("sort_order", ascending: true)
+            .execute()
+            .value
+    }
+
+    static func fetchCustomOrderPayments(customOrderId: Int64) async throws -> [CustomOrderPayment] {
+        try await supabase
+            .from("custom_order_payments")
+            .select("""
+                custom_order_payment_id,
+                payment_amount,
+                payment_method,
+                payment_reference,
+                payment_action,
+                taken_by_name,
+                created_at
+            """)
+            .eq("custom_order_id", value: String(customOrderId))
+            .order("created_at", ascending: false)
+            .execute()
+            .value
+    }
+
+    static func fetchOutstandingCustomOrders(customerId: Int) async throws -> [CustomerOutstandingCustomOrder] {
+        let rows: [CustomerOutstandingCustomOrder] = try await supabase
+            .from("custom_orders")
+            .select("custom_order_id, order_number, total_amount, amount_paid, balance_due, payment_status, created_at")
+            .eq("customer_id", value: customerId)
+            .neq("payment_status", value: "PAID")
+            .gt("balance_due", value: 0)
+            .order("created_at", ascending: true)
+            .execute()
+            .value
+
+        return rows
+    }
+
+    static func fetchOutstandingAccountItems(customerId: Int) async throws -> [CustomerOutstandingAccountItem] {
+        async let fetchedSales = fetchOutstandingAccountSales(customerId: customerId)
+        async let fetchedCustomOrders = fetchOutstandingCustomOrders(customerId: customerId)
+
+        let loadedSales = try await fetchedSales
+        let loadedCustomOrders = try await fetchedCustomOrders
+        let saleItems = loadedSales.map(CustomerOutstandingAccountItem.sale)
+        let customOrderItems = loadedCustomOrders.map(CustomerOutstandingAccountItem.customOrder)
+
+        return (saleItems + customOrderItems).sorted { first, second in
+            let firstDate = Sale.parseDate(first.createdAt) ?? .distantPast
+            let secondDate = Sale.parseDate(second.createdAt) ?? .distantPast
+            return firstDate < secondDate
+        }
     }
 
     static func recordPayment(

@@ -15,7 +15,7 @@ struct CustomerPaymentView: View {
     @State private var displayedBalance: Double
     @State private var paymentAmount = ""
     @State private var note = ""
-    @State private var outstandingSales: [CustomerOutstandingSale] = []
+    @State private var outstandingItems: [CustomerOutstandingAccountItem] = []
     @State private var isLoading = true
     @State private var isSaving = false
     @State private var errorMessage: String?
@@ -25,14 +25,14 @@ struct CustomerPaymentView: View {
         Double(paymentAmount.trimmingCharacters(in: .whitespacesAndNewlines))
     }
 
-    private var paymentPreview: [(sale: CustomerOutstandingSale, appliedAmount: Double)] {
+    private var paymentPreview: [(item: CustomerOutstandingAccountItem, appliedAmount: Double)] {
         var remaining = parsedPaymentAmount ?? 0
-        var preview: [(CustomerOutstandingSale, Double)] = []
+        var preview: [(CustomerOutstandingAccountItem, Double)] = []
 
-        for sale in outstandingSales where remaining > 0 {
-            let applied = min(remaining, sale.balanceDue)
+        for item in outstandingItems where remaining > 0 {
+            let applied = min(remaining, item.balanceDue)
             guard applied > 0 else { continue }
-            preview.append((sale, applied))
+            preview.append((item, applied))
             remaining -= applied
         }
 
@@ -109,30 +109,30 @@ struct CustomerPaymentView: View {
                 if isLoading {
                     HStack {
                         Spacer()
-                        ProgressView("Loading open sales...")
+                        ProgressView("Loading open account items...")
                         Spacer()
                     }
-                } else if outstandingSales.isEmpty {
+                } else if outstandingItems.isEmpty {
                     ContentUnavailableView(
-                        "No Open Account Sales",
+                        "No Open Account Items",
                         systemImage: "checkmark.circle",
-                        description: Text("This customer has no unpaid account-billed sales right now.")
+                        description: Text("This customer has no unpaid account-billed sales or custom orders right now.")
                     )
                 } else if paymentPreview.isEmpty {
                     Text("Enter a payment amount to preview how it will be applied oldest-first.")
                         .foregroundStyle(.secondary)
                 } else {
-                    ForEach(paymentPreview, id: \.sale.id) { preview in
+                    ForEach(paymentPreview, id: \.item.id) { preview in
                         VStack(alignment: .leading, spacing: 6) {
                             HStack {
-                                Text("Sale #\(preview.sale.saleId)")
+                                Text(preview.item.title)
                                     .font(.headline)
                                 Spacer()
                                 Text(currency(preview.appliedAmount))
                                     .font(.headline)
                             }
 
-                            if let createdAt = preview.sale.createdAt,
+                            if let createdAt = preview.item.createdAt,
                                let date = Sale.parseDate(createdAt) {
                                 Text(Self.dateFormatter.string(from: date))
                                     .font(.caption)
@@ -140,9 +140,9 @@ struct CustomerPaymentView: View {
                             }
 
                             HStack {
-                                Text("Due: \(preview.sale.balanceDueText)")
+                                Text("Due: \(currency(preview.item.balanceDue))")
                                 Spacer()
-                                Text("Net Sale: \(currency(preview.sale.netTotal))")
+                                Text("Total: \(preview.item.totalText)")
                             }
                             .font(.caption)
                             .foregroundStyle(.secondary)
@@ -178,7 +178,7 @@ struct CustomerPaymentView: View {
         defer { isLoading = false }
 
         do {
-            outstandingSales = try await CustomerAccountService.fetchOutstandingAccountSales(customerId: customer.customerId)
+            outstandingItems = try await CustomerAccountService.fetchOutstandingAccountItems(customerId: customer.customerId)
         } catch {
             errorMessage = error.localizedDescription
         }

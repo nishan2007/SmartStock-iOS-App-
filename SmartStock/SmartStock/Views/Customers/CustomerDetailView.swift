@@ -25,6 +25,13 @@ struct CustomerDetailView: View {
     @State private var editCreditLimit = ""
     @State private var editIsActive = true
     @State private var editIsBusiness = false
+    @State private var selectedSection: CustomerAccountDetailSection = .overview
+    @State private var sales: [Sale] = []
+    @State private var customOrders: [CustomOrder] = []
+    @State private var payments: [CustomerPaymentHistoryEntry] = []
+    @State private var transactions: [CustomerAccountTransactionEntry] = []
+    @State private var outstandingItems: [CustomerOutstandingAccountItem] = []
+    @State private var isLoadingActivity = true
 
     init(customer: CustomerAccount) {
         self.customer = customer
@@ -47,84 +54,16 @@ struct CustomerDetailView: View {
                 }
             }
 
-            Section("Customer Info") {
-                if isRefreshingCustomer {
-                    HStack {
-                        Spacer()
-                        ProgressView("Refreshing account...")
-                        Spacer()
+            Section {
+                Picker("Account Section", selection: $selectedSection) {
+                    ForEach(CustomerAccountDetailSection.allCases) { section in
+                        Text(section.title).tag(section)
                     }
                 }
-
-                detailRow(title: "Name", value: customerDetails.name)
-                detailRow(title: "Account Number", value: customerDetails.accountNumberText)
-
-                if let phone = nonEmpty(customerDetails.phone) {
-                    detailRow(title: "Phone", value: phone)
-                }
-
-                if let email = nonEmpty(customerDetails.email) {
-                    detailRow(title: "Email", value: email)
-                }
-
-                detailRow(title: "Balance", value: customerDetails.balanceText)
-                detailRow(title: "Credit Limit", value: customerDetails.creditLimitText)
-                detailRow(title: "Status", value: customerDetails.isActive ? "Active" : "Inactive")
-                detailRow(title: "Type", value: customerDetails.isBusiness ? "Business" : "Personal")
-
-                if let createdAtText = createdAtText {
-                    detailRow(title: "Created", value: createdAtText)
-                }
-
-                if let notes = nonEmpty(customerDetails.accountNotes) {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Notes")
-                            .font(.subheadline.weight(.semibold))
-                        Text(notes)
-                            .foregroundStyle(.secondary)
-                    }
-                    .padding(.vertical, 4)
-                }
+                .pickerStyle(.segmented)
             }
 
-            Section("Account Activity") {
-                if canManageCustomers {
-                    NavigationLink {
-                        CustomerPaymentView(customer: customerDetails) { newBalance in
-                            customerDetails = CustomerAccount(
-                                customerId: customerDetails.customerId,
-                                accountNumber: customerDetails.accountNumber,
-                                name: customerDetails.name,
-                                phone: customerDetails.phone,
-                                email: customerDetails.email,
-                                creditLimit: customerDetails.creditLimit,
-                                currentBalance: newBalance,
-                                isActive: customerDetails.isActive,
-                                isBusiness: customerDetails.isBusiness,
-                                accountNotes: customerDetails.accountNotes,
-                                customerTypeId: customerDetails.customerTypeId,
-                                createdAt: customerDetails.createdAt
-                            )
-                            await reloadCustomerData()
-                        }
-                        .environmentObject(sessionManager)
-                    } label: {
-                        Label("Record Payment", systemImage: "dollarsign.circle")
-                    }
-                }
-
-                NavigationLink {
-                    CustomerPaymentHistoryView(customer: customerDetails)
-                } label: {
-                    Label("Payment History", systemImage: "banknote")
-                }
-
-                NavigationLink {
-                    CustomerSalesHistoryView(customer: customerDetails)
-                } label: {
-                    Label("Sales History", systemImage: "receipt")
-                }
-            }
+            selectedAccountSections
         }
         .refreshable {
             await reloadCustomerData()
@@ -222,6 +161,33 @@ struct CustomerDetailView: View {
         sessionManager.currentUser?.canAccess(.editAccountNumber) == true
     }
 
+    private var availableCredit: Double {
+        (customerDetails.creditLimit ?? 0) - combinedCurrentBalance
+    }
+
+    private var accountLedgerBalance: Double {
+        customerDetails.currentBalance ?? 0
+    }
+
+    private var customOrderBalanceDue: Double {
+        let chargedCustomOrderIds = Set(
+            transactions.compactMap { transaction -> Int64? in
+                guard transaction.transactionType == "CUSTOM_ORDER_CREDIT" else { return nil }
+                return transaction.customOrderId
+            }
+        )
+
+        return customOrders.reduce(0) { total, order in
+            guard order.paymentStatus != .paid, order.balanceDue > 0 else { return total }
+            guard !chargedCustomOrderIds.contains(order.customOrderId) else { return total }
+            return total + order.balanceDue
+        }
+    }
+
+    private var combinedCurrentBalance: Double {
+        accountLedgerBalance + customOrderBalanceDue
+    }
+
     private var editTrimmedName: String {
         editName.trimmingCharacters(in: .whitespacesAndNewlines)
     }
@@ -249,8 +215,368 @@ struct CustomerDetailView: View {
         return Self.displayFormatter.string(from: date)
     }
 
+    @ViewBuilder
+    private var selectedAccountSections: some View {
+        switch selectedSection {
+        case .overview:
+            overviewSections
+        case .regularSales:
+            regularSalesSections
+        case .customOrders:
+            customOrderSections
+        case .payments:
+            paymentSections
+        case .transactions:
+            transactionSections
+        }
+    }
+
+    @ViewBuilder
+    private var overviewSections: some View {
+        Section("Customer Account") {
+            if isRefreshingCustomer {
+                loadingRow("Refreshing account...")
+            }
+
+            detailRow(title: "Account Number", value: customerDetails.accountNumberText)
+            detailRow(title: "Customer Name", value: customerDetails.name)
+
+            if let phone = nonEmpty(customerDetails.phone) {
+                detailRow(title: "Phone", value: phone)
+            }
+
+            if let email = nonEmpty(customerDetails.email) {
+                detailRow(title: "Email", value: email)
+            }
+
+            detailRow(title: "Current Balance", value: currency(combinedCurrentBalance))
+            detailRow(title: "Account Ledger Balance", value: currency(accountLedgerBalance))
+            detailRow(title: "Uncharged Custom Order Balance", value: currency(customOrderBalanceDue))
+            detailRow(title: "Credit Limit", value: customerDetails.creditLimitText)
+            detailRow(title: "Available Credit", value: currency(availableCredit))
+            detailRow(title: "Status", value: customerDetails.isActive ? "Active" : "Inactive")
+            detailRow(title: "Type", value: customerDetails.isBusiness ? "Business" : "Personal")
+
+            if let createdAtText {
+                detailRow(title: "Created", value: createdAtText)
+            }
+
+            if let notes = nonEmpty(customerDetails.accountNotes) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Notes")
+                        .font(.subheadline.weight(.semibold))
+                    Text(notes)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.vertical, 4)
+            }
+        }
+
+        Section("Summary") {
+            LabeledContent("Regular Sales", value: "\(sales.count)")
+            LabeledContent("Custom Orders", value: "\(customOrders.count)")
+            LabeledContent("Payments", value: "\(payments.count)")
+            LabeledContent("Transactions", value: "\(transactions.count)")
+        }
+
+        Section("Outstanding Account Items") {
+            if isLoadingActivity {
+                loadingRow("Loading account items...")
+            } else if outstandingItems.isEmpty {
+                ContentUnavailableView(
+                    "No Outstanding Items",
+                    systemImage: "checkmark.circle",
+                    description: Text("Unpaid sales and custom orders will appear here.")
+                )
+            } else {
+                ForEach(outstandingItems) { item in
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack {
+                            Text(item.title)
+                                .font(.headline)
+                            Spacer()
+                            Text(currency(item.balanceDue))
+                                .font(.headline)
+                        }
+
+                        HStack {
+                            if let createdAt = formattedDate(item.createdAt) {
+                                Text(createdAt)
+                            }
+                            Spacer()
+                            Text("Total: \(item.totalText)")
+                        }
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    }
+                    .padding(.vertical, 4)
+                }
+            }
+        }
+
+        if canManageCustomers {
+            Section("Account Actions") {
+                NavigationLink {
+                    CustomerPaymentView(customer: customerDetails) { newBalance in
+                        customerDetails = CustomerAccount(
+                            customerId: customerDetails.customerId,
+                            accountNumber: customerDetails.accountNumber,
+                            name: customerDetails.name,
+                            phone: customerDetails.phone,
+                            email: customerDetails.email,
+                            creditLimit: customerDetails.creditLimit,
+                            currentBalance: newBalance,
+                            isActive: customerDetails.isActive,
+                            isBusiness: customerDetails.isBusiness,
+                            accountNotes: customerDetails.accountNotes,
+                            customerTypeId: customerDetails.customerTypeId,
+                            createdAt: customerDetails.createdAt
+                        )
+                        await reloadCustomerData()
+                    }
+                    .environmentObject(sessionManager)
+                } label: {
+                    Label("Record Payment", systemImage: "dollarsign.circle")
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var regularSalesSections: some View {
+        Section {
+            LabeledContent("Sales", value: "\(sales.count)")
+        }
+
+        Section("Regular Sales") {
+            if isLoadingActivity {
+                loadingRow("Loading sales...")
+            } else if sales.isEmpty {
+                ContentUnavailableView(
+                    "No Sales Yet",
+                    systemImage: "receipt",
+                    description: Text("Sales for this customer will appear here.")
+                )
+            } else {
+                ForEach(sales) { sale in
+                    NavigationLink {
+                        SaleDetailView(sale: sale)
+                    } label: {
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack {
+                                Text("Sale \(sale.receiptNumberText)")
+                                    .font(.headline)
+                                Spacer()
+                                Text(sale.totalText)
+                                    .font(.headline)
+                            }
+
+                            Text(sale.createdAtText)
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+
+                            HStack {
+                                Text(sale.storeName)
+                                Spacer()
+                                Text(sale.paymentStatusText)
+                            }
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        }
+                        .padding(.vertical, 4)
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var customOrderSections: some View {
+        Section {
+            LabeledContent("Custom Orders", value: "\(customOrders.count)")
+        }
+
+        Section("Custom Orders") {
+            if isLoadingActivity {
+                loadingRow("Loading custom orders...")
+            } else if customOrders.isEmpty {
+                ContentUnavailableView(
+                    "No Custom Orders",
+                    systemImage: "list.clipboard",
+                    description: Text("Custom orders linked to this customer will appear here.")
+                )
+            } else {
+                ForEach(customOrders) { order in
+                    NavigationLink {
+                        CustomerCustomOrderDetailView(order: order)
+                    } label: {
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack(alignment: .top) {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(order.displayNumber)
+                                        .font(.headline)
+                                    Text("Status: \(order.status.title)")
+                                        .font(.subheadline)
+                                        .foregroundStyle(.secondary)
+                                }
+
+                                Spacer()
+
+                                Text(order.totalText)
+                                    .font(.headline)
+                            }
+
+                            HStack {
+                                Text("Paid: \(currency(order.amountPaid))")
+                                Spacer()
+                                Text("Balance: \(order.balanceText)")
+                            }
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+
+                            HStack {
+                                if let dueDate = formattedDate(order.dueDate) {
+                                    Text("Due: \(dueDate)")
+                                } else if let createdAt = formattedDate(order.createdAt) {
+                                    Text("Created: \(createdAt)")
+                                }
+                                Spacer()
+                                Text("Payment: \(order.paymentStatus.title)")
+                            }
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+
+                            if let paymentMethod = nonEmpty(order.paymentMethod) {
+                                Text("Method: \(displayText(paymentMethod))")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        .padding(.vertical, 4)
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var paymentSections: some View {
+        Section {
+            LabeledContent("Payments", value: "\(payments.count)")
+        }
+
+        Section("Payments") {
+            if isLoadingActivity {
+                loadingRow("Loading payments...")
+            } else if payments.isEmpty {
+                ContentUnavailableView(
+                    "No Payments Yet",
+                    systemImage: "banknote",
+                    description: Text("Recorded customer payments will appear here.")
+                )
+            } else {
+                ForEach(payments) { payment in
+                    VStack(alignment: .leading, spacing: 10) {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(payment.paymentIdText)
+                                    .font(.headline)
+
+                                if let createdAt = formattedDate(payment.createdAt) {
+                                    Text(createdAt)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+
+                            Spacer()
+
+                            Text(payment.paymentAmountText)
+                                .font(.headline)
+                        }
+
+                        if let userName = nonEmpty(payment.userName) {
+                            Text("By \(userName)")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+
+                        ForEach(payment.customerAccountPaymentAllocations) { allocation in
+                            HStack {
+                                Text(allocation.sourceText)
+                                Spacer()
+                                Text(allocation.amountText)
+                            }
+                            .font(.subheadline)
+                        }
+                    }
+                    .padding(.vertical, 6)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var transactionSections: some View {
+        Section {
+            LabeledContent("Transactions", value: "\(transactions.count)")
+        }
+
+        Section("Transactions") {
+            if isLoadingActivity {
+                loadingRow("Loading transactions...")
+            } else if transactions.isEmpty {
+                ContentUnavailableView(
+                    "No Transactions",
+                    systemImage: "clock.arrow.circlepath",
+                    description: Text("Account ledger entries will appear here.")
+                )
+            } else {
+                ForEach(transactions) { transaction in
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack(alignment: .top) {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(transaction.displayType)
+                                    .font(.headline)
+                                Text(transaction.sourceText)
+                                    .font(.subheadline)
+                                    .foregroundStyle(.secondary)
+                            }
+
+                            Spacer()
+
+                            Text(transaction.amountText)
+                                .font(.headline)
+                        }
+
+                        if let createdAt = formattedDate(transaction.createdAt) {
+                            Text(createdAt)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+
+                        if let userName = nonEmpty(transaction.userName) {
+                            Text("By \(userName)")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+
+                        if let note = nonEmpty(transaction.note) {
+                            Text(note)
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .padding(.vertical, 6)
+                }
+            }
+        }
+    }
+
     private func reloadCustomerData() async {
-        await refreshCustomerDetails()
+        async let customerRefresh: Void = refreshCustomerDetails()
+        async let activityRefresh: Void = refreshAccountActivity()
+        _ = await (customerRefresh, activityRefresh)
     }
 
     private func refreshCustomerDetails() async {
@@ -261,6 +587,35 @@ struct CustomerDetailView: View {
             customerDetails = try await CustomerAccountService.fetchCustomer(customerDetails.customerId)
         } catch {
             print("LOAD CUSTOMER DETAIL ERROR:", error)
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    private func refreshAccountActivity() async {
+        isLoadingActivity = true
+        errorMessage = nil
+        defer { isLoadingActivity = false }
+
+        do {
+            async let fetchedSales: [Sale] = supabase
+                .from("sales")
+                .select("sale_id, total_amount, status, transaction_source, created_at, payment_status, returned_amount, receipt_number, receipt_device_id, receipt_sequence, users(full_name), locations(name), customer_accounts(name)")
+                .eq("customer_id", value: customerDetails.customerId)
+                .order("sale_id", ascending: false)
+                .execute()
+                .value
+            async let fetchedCustomOrders = CustomerAccountService.fetchCustomOrders(customerId: customerDetails.customerId)
+            async let fetchedPayments = CustomerAccountService.fetchPaymentHistory(customerId: customerDetails.customerId)
+            async let fetchedTransactions = CustomerAccountService.fetchTransactions(customerId: customerDetails.customerId)
+            async let fetchedOutstandingItems = CustomerAccountService.fetchOutstandingAccountItems(customerId: customerDetails.customerId)
+
+            sales = try await fetchedSales
+            customOrders = try await fetchedCustomOrders
+            payments = try await fetchedPayments
+            transactions = try await fetchedTransactions
+            outstandingItems = try await fetchedOutstandingItems
+        } catch {
+            print("LOAD CUSTOMER ACCOUNT ACTIVITY ERROR:", error)
             errorMessage = error.localizedDescription
         }
     }
@@ -345,6 +700,27 @@ struct CustomerDetailView: View {
         return trimmed.isEmpty ? nil : trimmed
     }
 
+    private func formattedDate(_ value: String?) -> String? {
+        guard let date = Sale.parseDate(value) else { return nil }
+        return Self.displayFormatter.string(from: date)
+    }
+
+    private func displayText(_ value: String) -> String {
+        value.replacingOccurrences(of: "_", with: " ").capitalized
+    }
+
+    private func currency(_ value: Double) -> String {
+        String(format: "$%.2f", value)
+    }
+
+    private func loadingRow(_ title: String) -> some View {
+        HStack {
+            Spacer()
+            ProgressView(title)
+            Spacer()
+        }
+    }
+
     @ViewBuilder
     private func detailRow(title: String, value: String) -> some View {
         HStack(alignment: .top) {
@@ -364,6 +740,31 @@ struct CustomerDetailView: View {
         formatter.timeStyle = .short
         return formatter
     }()
+}
+
+private enum CustomerAccountDetailSection: String, CaseIterable, Identifiable {
+    case overview
+    case regularSales
+    case customOrders
+    case payments
+    case transactions
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .overview:
+            return "Overview"
+        case .regularSales:
+            return "Sales"
+        case .customOrders:
+            return "Orders"
+        case .payments:
+            return "Payments"
+        case .transactions:
+            return "Ledger"
+        }
+    }
 }
 
 private struct CustomerAccountUpdatePayload: Encodable {
