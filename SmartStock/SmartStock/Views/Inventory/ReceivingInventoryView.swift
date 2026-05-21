@@ -8,6 +8,7 @@ import SwiftUI
 struct ReceivingInventoryView: View {
     @EnvironmentObject private var sessionManager: SessionManager
     private let service = OperationsService()
+    private let customOrderService = CustomOrderService()
     let isEmbedded: Bool
 
     @State private var barcode = ""
@@ -92,7 +93,7 @@ struct ReceivingInventoryView: View {
                 ContentUnavailableView(
                     "No Shipment Items",
                     systemImage: "tray",
-                    description: Text("Scan products and add them to the shipment before receiving.")
+                    description: Text("Scan products or custom items and add them to the shipment before receiving.")
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
@@ -100,12 +101,17 @@ struct ReceivingInventoryView: View {
                     ForEach(shipmentItems) { item in
                         HStack(alignment: .center, spacing: 12) {
                             VStack(alignment: .leading, spacing: 8) {
-                                Text(item.productName)
+                                Text(item.itemName)
                                     .font(.headline)
 
-                                Text(item.barcode)
-                                    .font(.subheadline)
-                                    .foregroundStyle(.secondary)
+                                HStack(spacing: 8) {
+                                    Text(item.kindTitle)
+                                        .font(.caption.weight(.semibold))
+                                        .foregroundStyle(item.isCustomItem ? .purple : .blue)
+                                    Text(item.barcode)
+                                        .font(.subheadline)
+                                        .foregroundStyle(.secondary)
+                                }
                             }
 
                             Spacer(minLength: 12)
@@ -231,22 +237,17 @@ struct ReceivingInventoryView: View {
         successMessage = nil
 
         do {
-            guard let product = try await service.searchProduct(trimmedBarcode) else {
-                errorMessage = "No product found for that barcode or search."
+            guard let lookupItem = try await customOrderService.searchReceivingItem(trimmedBarcode) else {
+                errorMessage = "No product or custom item found for that barcode or search."
                 return
             }
 
-            if let index = shipmentItems.firstIndex(where: { $0.productId == product.id }) {
+            let newItem = ReceivingCartItem(lookupItem: lookupItem, barcode: trimmedBarcode, quantity: quantityValue)
+
+            if let index = shipmentItems.firstIndex(where: { $0.lookupKey == newItem.lookupKey }) {
                 shipmentItems[index].quantity += quantityValue
             } else {
-                shipmentItems.append(
-                    ReceivingCartItem(
-                        productId: product.id,
-                        productName: product.name,
-                        barcode: trimmedBarcode,
-                        quantity: quantityValue
-                    )
-                )
+                shipmentItems.append(newItem)
             }
 
             barcode = ""
@@ -273,10 +274,19 @@ struct ReceivingInventoryView: View {
 
         do {
             let result = try await service.receiveInventory(
-                items: shipmentItems.map {
-                    ReceiveInventoryItem(
-                        productId: $0.productId,
-                        productName: $0.productName,
+                productItems: shipmentItems.compactMap {
+                    guard let productId = $0.productId else { return nil }
+                    return ReceiveInventoryItem(
+                        productId: productId,
+                        productName: $0.itemName,
+                        quantity: $0.quantity
+                    )
+                },
+                customItems: shipmentItems.compactMap {
+                    guard let customItemId = $0.customItemId else { return nil }
+                    return ReceiveCustomOrderItem(
+                        customItemId: customItemId,
+                        itemName: $0.itemName,
                         quantity: $0.quantity
                     )
                 },
@@ -338,8 +348,34 @@ struct ReceivingInventoryView: View {
 
 private struct ReceivingCartItem: Identifiable {
     let id = UUID()
-    let productId: Int
-    let productName: String
+    let productId: Int?
+    let customItemId: Int64?
+    let itemName: String
     let barcode: String
     var quantity: Int
+
+    init(lookupItem: ReceivingLookupItem, barcode: String, quantity: Int) {
+        switch lookupItem {
+        case .product(let product):
+            productId = product.id
+            customItemId = nil
+            itemName = product.name
+        case .customItem(let customItem):
+            productId = nil
+            customItemId = customItem.customItemId
+            itemName = customItem.itemName
+        }
+        self.barcode = barcode
+        self.quantity = quantity
+    }
+
+    var lookupKey: String {
+        if let productId {
+            return "product-\(productId)"
+        }
+        return "custom-\(customItemId ?? 0)"
+    }
+
+    var isCustomItem: Bool { customItemId != nil }
+    var kindTitle: String { isCustomItem ? "Custom Item" : "Product" }
 }

@@ -28,6 +28,9 @@ struct NewSale: Encodable {
     let receipt_number: String
     let receipt_device_id: String
     let receipt_sequence: Int
+    let device_id: String
+    let device_name: String
+    let completed_at: String
 }
 
 struct InsertedSaleRow: Decodable {
@@ -39,6 +42,12 @@ struct NewSaleItem: Encodable {
     let product_id: Int
     let quantity: Int
     let unit_price: Double
+}
+
+struct InsertedSaleItemRow: Decodable {
+    let sale_item_id: Int
+    let sale_id: Int
+    let product_id: Int
 }
 
 struct InventoryRow: Decodable {
@@ -56,6 +65,12 @@ struct NewInventoryMovement: Encodable {
     let change_qty: Int
     let reason: String
     let note: String?
+    let user_name: String
+    let user_id: Int
+    let sale_id: Int
+    let sale_item_id: Int
+    let device_id: String
+    let device_name: String
 }
 
 // MARK: - Private DTOs (used only in this service)
@@ -69,6 +84,30 @@ private struct CustomerBalanceRow: Decodable {
 
 private struct CustomerBalanceUpdate: Encodable {
     let current_balance: Double
+}
+
+private struct NewSaleAuditLog: Encodable {
+    let sale_id: Int?
+    let sale_item_id: Int?
+    let return_id: Int64?
+    let return_item_id: Int64?
+    let customer_id: Int?
+    let product_id: Int?
+    let location_id: Int
+    let action_type: String
+    let action_scope: String
+    let field_name: String?
+    let old_value: String?
+    let new_value: String?
+    let amount: Double?
+    let quantity: Int?
+    let reason: String?
+    let note: String?
+    let user_id: Int
+    let user_name: String
+    let device_id: String
+    let device_name: String
+    let created_at: String
 }
 
 // MARK: - Enums
@@ -122,7 +161,8 @@ enum CheckoutService {
         store: Store,
         paymentMethod: CheckoutPaymentMethod,
         customerAccountId: Int? = nil,
-        paymentReference: String? = nil
+        paymentReference: String? = nil,
+        device: TrackedDevice? = nil
     ) async throws {
         
         guard !cart.isEmpty else { return }
@@ -134,6 +174,8 @@ enum CheckoutService {
         let receipt = await MainActor.run {
             ReceiptNumberManager.shared.nextReceipt(for: store.id)
         }
+        let auditTimestamp = ISO8601DateFormatter().string(from: Date())
+        let deviceContext = await makeDeviceContext(device: device)
         
         let trimmedReference = paymentReference?.trimmingCharacters(in: .whitespacesAndNewlines)
         let resolvedCustomerAccountId: Int?
@@ -206,10 +248,13 @@ enum CheckoutService {
             payment_status: paymentStatus,
             amount_paid: amountPaid,
             payment_reference: resolvedPaymentReference,
-            transaction_source: "mobile_app",
+            transaction_source: "iOS_app",
             receipt_number: receipt.receiptNumber,
             receipt_device_id: receipt.deviceId,
-            receipt_sequence: receipt.sequence
+            receipt_sequence: receipt.sequence,
+            device_id: deviceContext.id,
+            device_name: deviceContext.name,
+            completed_at: auditTimestamp
         )
         
         let insertedSale: InsertedSaleRow = try await supabase
@@ -242,7 +287,9 @@ enum CheckoutService {
                     amount: total,
                     transaction_type: transactionType,
                     note: note,
-                    user_name: user.fullName
+                    user_name: user.fullName,
+                    device_id: deviceContext.id,
+                    device_name: deviceContext.name
                 ))
                 .execute()
         }
@@ -257,18 +304,85 @@ enum CheckoutService {
             )
         }
         
-        try await supabase.from("sale_items").insert(saleItems).execute()
+        let insertedSaleItems: [InsertedSaleItemRow] = try await supabase
+            .from("sale_items")
+            .insert(saleItems)
+            .select("sale_item_id, sale_id, product_id")
+            .execute()
+            .value
+
+        var insertedSaleItemByProduct = Dictionary(grouping: insertedSaleItems, by: \.product_id)
+        var auditRows: [NewSaleAuditLog] = [
+            audit(
+                saleId: insertedSale.sale_id,
+                customerId: resolvedCustomerAccountId,
+                locationId: store.id,
+                actionType: "SALE_CREATED",
+                actionScope: "SALE",
+                amount: total,
+                note: "receipt_number=\(receipt.receiptNumber)",
+                user: user,
+                deviceContext: deviceContext,
+                createdAt: auditTimestamp
+            ),
+            audit(
+                saleId: insertedSale.sale_id,
+                customerId: resolvedCustomerAccountId,
+                locationId: store.id,
+                actionType: "PAYMENT_RECORDED",
+                actionScope: "SALE",
+                fieldName: "payment_method",
+                newValue: paymentMethod.rawValue,
+                amount: amountPaid,
+                note: resolvedPaymentReference.map { "payment_reference=\($0)" },
+                user: user,
+                deviceContext: deviceContext,
+                createdAt: auditTimestamp
+            )
+        ]
+
+        if paymentMethod == .account {
+            auditRows.append(audit(saleId: insertedSale.sale_id, customerId: resolvedCustomerAccountId, locationId: store.id, actionType: "ACCOUNT_CHARGE_RECORDED", actionScope: "SALE", fieldName: "customer_id", newValue: resolvedCustomerAccountId.map(String.init), amount: total, note: "billed_to_account", user: user, deviceContext: deviceContext, createdAt: auditTimestamp))
+        }
+
+        if resolvedCustomerAccountId != nil {
+            auditRows.append(audit(saleId: insertedSale.sale_id, customerId: resolvedCustomerAccountId, locationId: store.id, actionType: "CUSTOMER_ACCOUNT_TRANSACTION", actionScope: "CUSTOMER_ACCOUNT", fieldName: "transaction_type", newValue: paymentMethod == .account ? "SALE_CREDIT" : "SALE_PAID", amount: total, note: "sale_id=\(insertedSale.sale_id)", user: user, deviceContext: deviceContext, createdAt: auditTimestamp))
+        }
+
+        if totalDiscountAmount > 0 {
+            auditRows.append(audit(saleId: insertedSale.sale_id, customerId: resolvedCustomerAccountId, locationId: store.id, actionType: "SALE_DISCOUNT_APPLIED", actionScope: "SALE", fieldName: "discount_amount", oldValue: "0", newValue: String(totalDiscountAmount), amount: totalDiscountAmount, user: user, deviceContext: deviceContext, createdAt: auditTimestamp))
+        }
         
         // Update Inventory for each item
         for item in cart {
-            let inventory: InventoryRow = try await supabase
+            guard var saleItemRows = insertedSaleItemByProduct[item.product.id],
+                  !saleItemRows.isEmpty else {
+                continue
+            }
+            let insertedSaleItem = saleItemRows.removeFirst()
+            insertedSaleItemByProduct[item.product.id] = saleItemRows
+
+            auditRows.append(audit(saleId: insertedSale.sale_id, saleItemId: insertedSaleItem.sale_item_id, customerId: resolvedCustomerAccountId, productId: item.product.id, locationId: store.id, actionType: "SALE_ITEM_ADDED", actionScope: "SALE_ITEM", amount: item.lineTotal, quantity: item.quantity, note: item.product.name, user: user, deviceContext: deviceContext, createdAt: auditTimestamp))
+
+            let originalPrice = item.product.price ?? 0
+            if abs(item.unitPrice - originalPrice) > 0.0001 {
+                auditRows.append(audit(saleId: insertedSale.sale_id, saleItemId: insertedSaleItem.sale_item_id, customerId: resolvedCustomerAccountId, productId: item.product.id, locationId: store.id, actionType: "PRICE_OVERRIDE", actionScope: "SALE_ITEM", fieldName: "unit_price", oldValue: String(originalPrice), newValue: String(item.unitPrice), amount: item.unitPrice, quantity: item.quantity, note: item.product.name, user: user, deviceContext: deviceContext, createdAt: auditTimestamp))
+            }
+
+            if item.discountAmount > 0 {
+                auditRows.append(audit(saleId: insertedSale.sale_id, saleItemId: insertedSaleItem.sale_item_id, customerId: resolvedCustomerAccountId, productId: item.product.id, locationId: store.id, actionType: "ITEM_DISCOUNT_APPLIED", actionScope: "SALE_ITEM", fieldName: "discount_amount", oldValue: "0", newValue: String(item.discountAmount), amount: item.discountAmount, quantity: item.quantity, note: item.product.name, user: user, deviceContext: deviceContext, createdAt: auditTimestamp))
+            }
+
+            let inventoryRows: [InventoryRow] = try await supabase
                 .from("inventory")
                 .select("inventory_id, quantity_on_hand")
                 .eq("product_id", value: item.product.id)
                 .eq("location_id", value: store.id)
-                .single()
                 .execute()
                 .value
+            guard let inventory = inventoryRows.first else {
+                continue
+            }
             
             let newQty = inventory.quantity_on_hand - item.quantity
             
@@ -285,9 +399,83 @@ enum CheckoutService {
                     location_id: store.id,
                     change_qty: -item.quantity,
                     reason: "SALE",
-                    note: "sale_id=\(insertedSale.sale_id)"
+                    note: "sale_id=\(insertedSale.sale_id)",
+                    user_name: user.fullName,
+                    user_id: user.id,
+                    sale_id: insertedSale.sale_id,
+                    sale_item_id: insertedSaleItem.sale_item_id,
+                    device_id: deviceContext.id,
+                    device_name: deviceContext.name
                 ))
                 .execute()
+
+            auditRows.append(audit(saleId: insertedSale.sale_id, saleItemId: insertedSaleItem.sale_item_id, customerId: resolvedCustomerAccountId, productId: item.product.id, locationId: store.id, actionType: "INVENTORY_DEDUCTED", actionScope: "INVENTORY", fieldName: "quantity_on_hand", oldValue: String(inventory.quantity_on_hand), newValue: String(newQty), quantity: -item.quantity, reason: "SALE", note: "sale_id=\(insertedSale.sale_id)", user: user, deviceContext: deviceContext, createdAt: auditTimestamp))
         }
+
+        try await insertAuditRows(auditRows)
+    }
+
+    private static func insertAuditRows(_ rows: [NewSaleAuditLog]) async throws {
+        guard !rows.isEmpty else { return }
+        try await supabase.from("sale_audit_log").insert(rows).execute()
+    }
+
+    private static func makeDeviceContext(device: TrackedDevice?) async -> (id: String, name: String) {
+        let fallbackDeviceName = await MainActor.run {
+            ReceiptNumberManager.shared.currentDeviceId()
+        }
+        let trimmedDeviceName = device?.deviceName?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedModelName = device?.modelName.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        return (
+            id: device?.id.uuidString ?? DeviceService.shared.currentInstallationId(),
+            name: trimmedDeviceName?.isEmpty == false ? trimmedDeviceName! : (trimmedModelName?.isEmpty == false ? trimmedModelName! : fallbackDeviceName)
+        )
+    }
+
+    private static func audit(
+        saleId: Int?,
+        saleItemId: Int? = nil,
+        returnId: Int64? = nil,
+        returnItemId: Int64? = nil,
+        customerId: Int? = nil,
+        productId: Int? = nil,
+        locationId: Int,
+        actionType: String,
+        actionScope: String,
+        fieldName: String? = nil,
+        oldValue: String? = nil,
+        newValue: String? = nil,
+        amount: Double? = nil,
+        quantity: Int? = nil,
+        reason: String? = nil,
+        note: String? = nil,
+        user: AppUser,
+        deviceContext: (id: String, name: String),
+        createdAt: String
+    ) -> NewSaleAuditLog {
+        NewSaleAuditLog(
+            sale_id: saleId,
+            sale_item_id: saleItemId,
+            return_id: returnId,
+            return_item_id: returnItemId,
+            customer_id: customerId,
+            product_id: productId,
+            location_id: locationId,
+            action_type: actionType,
+            action_scope: actionScope,
+            field_name: fieldName,
+            old_value: oldValue,
+            new_value: newValue,
+            amount: amount,
+            quantity: quantity,
+            reason: reason,
+            note: note,
+            user_id: user.id,
+            user_name: user.fullName,
+            device_id: deviceContext.id,
+            device_name: deviceContext.name,
+            created_at: createdAt
+        )
     }
 }

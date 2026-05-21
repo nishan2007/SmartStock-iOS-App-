@@ -75,7 +75,16 @@ struct OperationsService {
         store: Store,
         user: AppUser
     ) async throws -> ReceiveInventoryResult {
-        guard !items.isEmpty else {
+        try await receiveInventory(productItems: items, customItems: [], store: store, user: user)
+    }
+
+    func receiveInventory(
+        productItems: [ReceiveInventoryItem],
+        customItems: [ReceiveCustomOrderItem],
+        store: Store,
+        user: AppUser
+    ) async throws -> ReceiveInventoryResult {
+        guard !productItems.isEmpty || !customItems.isEmpty else {
             throw OperationsServiceError.invalidQuantity
         }
 
@@ -97,7 +106,7 @@ struct OperationsService {
             .insert(receiveBatch)
             .execute()
 
-        for item in items {
+        for item in productItems {
             let existingInventory = try await fetchInventoryRecord(productId: item.productId, locationId: store.id)
             let newQuantity = (existingInventory?.quantity_on_hand ?? 0) + item.quantity
 
@@ -133,11 +142,18 @@ struct OperationsService {
                 .execute()
         }
 
+        if !customItems.isEmpty {
+            try await CustomOrderService().receiveCustomItems(customItems, receiveNumber: receiveNumber, user: user)
+        }
+
         let summaryName: String
-        if items.count == 1 {
-            summaryName = items[0].productName
+        let totalItemCount = productItems.count + customItems.count
+        if totalItemCount == 1, let item = productItems.first {
+            summaryName = item.productName
+        } else if totalItemCount == 1, let item = customItems.first {
+            summaryName = item.itemName
         } else {
-            summaryName = "\(items.count) items"
+            summaryName = "\(totalItemCount) items"
         }
 
         return ReceiveInventoryResult(productName: summaryName, receiveId: receiveNumber.receiveId)
@@ -558,7 +574,8 @@ struct OperationsService {
         reason: String,
         restockItem: Bool,
         store: Store,
-        user: AppUser
+        user: AppUser,
+        device: TrackedDevice? = nil
     ) async throws -> ReturnResult {
         guard quantity > 0 else {
             throw OperationsServiceError.invalidQuantity
@@ -571,6 +588,8 @@ struct OperationsService {
         }
 
         let refundAmount = Double(quantity) * (item.unit_price ?? 0)
+        let auditTimestamp = ISO8601DateFormatter().string(from: Date())
+        let deviceContext = await makeDeviceContext(device: device)
         let insertedReturn: InsertedSaleReturn = try await client
             .from("sale_returns")
             .insert(
@@ -582,7 +601,8 @@ struct OperationsService {
                     refund_method: "CASH",
                     refund_amount: refundAmount,
                     reason: reason,
-                    device_id: await MainActor.run { ReceiptNumberManager.shared.currentDeviceId() }
+                    device_id: deviceContext.id,
+                    device_name: deviceContext.name
                 )
             )
             .select("return_id")
@@ -590,7 +610,7 @@ struct OperationsService {
             .execute()
             .value
 
-        _ = try await client
+        let insertedReturnItem: InsertedSaleReturnItem = try await client
             .from("sale_return_items")
             .insert(
                 NewSaleReturnItem(
@@ -601,7 +621,15 @@ struct OperationsService {
                     unit_price: item.unit_price ?? 0
                 )
             )
+            .select("return_item_id")
+            .single()
             .execute()
+            .value
+
+        var auditRows: [OperationSaleAuditLog] = [
+            saleAudit(saleId: sale.sale_id, returnId: insertedReturn.return_id, customerId: sale.customer_id, locationId: store.id, actionType: "RETURN_CREATED", actionScope: "RETURN", amount: refundAmount, quantity: quantity, reason: reason, note: "refund_method=CASH", user: user, deviceContext: deviceContext, createdAt: auditTimestamp),
+            saleAudit(saleId: sale.sale_id, saleItemId: item.sale_item_id, returnId: insertedReturn.return_id, returnItemId: insertedReturnItem.return_item_id, customerId: sale.customer_id, productId: item.product_id, locationId: store.id, actionType: "RETURN_LINE_RECORDED", actionScope: "RETURN_ITEM", amount: refundAmount, quantity: quantity, reason: reason, note: item.productName, user: user, deviceContext: deviceContext, createdAt: auditTimestamp)
+        ]
 
         _ = try await client
             .from("sales")
@@ -609,22 +637,14 @@ struct OperationsService {
             .eq("sale_id", value: sale.sale_id)
             .execute()
 
-        if restockItem {
-            let existingInventory = try await fetchInventoryRecord(productId: item.product_id, locationId: store.id)
-            let newQuantity = (existingInventory?.quantity_on_hand ?? 0) + quantity
+        if restockItem, let existingInventory = try await fetchInventoryRecord(productId: item.product_id, locationId: store.id) {
+            let newQuantity = existingInventory.quantity_on_hand + quantity
 
-            if let existingInventory {
-                _ = try await client
-                    .from("inventory")
-                    .update(InventoryQuantityUpdate(quantity_on_hand: newQuantity))
-                    .eq("inventory_id", value: existingInventory.inventory_id)
-                    .execute()
-            } else {
-                _ = try await client
-                    .from("inventory")
-                    .insert(NewInventoryRecord(product_id: item.product_id, location_id: store.id, quantity_on_hand: quantity))
-                    .execute()
-            }
+            _ = try await client
+                .from("inventory")
+                .update(InventoryQuantityUpdate(quantity_on_hand: newQuantity))
+                .eq("inventory_id", value: existingInventory.inventory_id)
+                .execute()
 
             _ = try await client
                     .from("inventory_movements")
@@ -638,11 +658,21 @@ struct OperationsService {
                         receive_id: nil,
                         receive_device_id: nil,
                         receive_sequence: nil,
-                        user_name: user.fullName
+                        user_name: user.fullName,
+                        sale_id: sale.sale_id,
+                        sale_item_id: item.sale_item_id,
+                        sale_return_id: insertedReturn.return_id,
+                        device_id: deviceContext.id,
+                        device_name: deviceContext.name,
+                        user_id: user.id
                     )
                 )
                 .execute()
+
+            auditRows.append(saleAudit(saleId: sale.sale_id, saleItemId: item.sale_item_id, returnId: insertedReturn.return_id, returnItemId: insertedReturnItem.return_item_id, customerId: sale.customer_id, productId: item.product_id, locationId: store.id, actionType: "RETURN_INVENTORY_RESTOCKED", actionScope: "INVENTORY", fieldName: "quantity_on_hand", oldValue: String(existingInventory.quantity_on_hand), newValue: String(newQuantity), quantity: quantity, reason: "RETURN", note: "return_id=\(insertedReturn.return_id)", user: user, deviceContext: deviceContext, createdAt: auditTimestamp))
         }
+
+        try await insertSaleAuditRows(auditRows)
 
         return ReturnResult(returnId: insertedReturn.return_id, refundAmount: refundAmount, productName: item.productName)
     }
@@ -941,7 +971,7 @@ struct OperationsService {
         if let saleId = Int(query) {
             let rows: [ReturnLookupSale] = try await client
                 .from("sales")
-                .select("sale_id, receipt_number, returned_amount")
+                .select("sale_id, receipt_number, returned_amount, customer_id")
                 .eq("sale_id", value: saleId)
                 .eq("location_id", value: storeId)
                 .limit(1)
@@ -952,13 +982,77 @@ struct OperationsService {
 
         let rows: [ReturnLookupSale] = try await client
             .from("sales")
-            .select("sale_id, receipt_number, returned_amount")
+            .select("sale_id, receipt_number, returned_amount, customer_id")
             .eq("receipt_number", value: query)
             .eq("location_id", value: storeId)
             .limit(1)
             .execute()
             .value
         return rows.first
+    }
+
+    private func insertSaleAuditRows(_ rows: [OperationSaleAuditLog]) async throws {
+        guard !rows.isEmpty else { return }
+        try await client.from("sale_audit_log").insert(rows).execute()
+    }
+
+    private func makeDeviceContext(device: TrackedDevice?) async -> (id: String, name: String) {
+        let fallbackDeviceName = await MainActor.run {
+            ReceiptNumberManager.shared.currentDeviceId()
+        }
+        let trimmedDeviceName = device?.deviceName?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedModelName = device?.modelName.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        return (
+            id: device?.id.uuidString ?? DeviceService.shared.currentInstallationId(),
+            name: trimmedDeviceName?.isEmpty == false ? trimmedDeviceName! : (trimmedModelName?.isEmpty == false ? trimmedModelName! : fallbackDeviceName)
+        )
+    }
+
+    private func saleAudit(
+        saleId: Int?,
+        saleItemId: Int? = nil,
+        returnId: Int64? = nil,
+        returnItemId: Int64? = nil,
+        customerId: Int? = nil,
+        productId: Int? = nil,
+        locationId: Int,
+        actionType: String,
+        actionScope: String,
+        fieldName: String? = nil,
+        oldValue: String? = nil,
+        newValue: String? = nil,
+        amount: Double? = nil,
+        quantity: Int? = nil,
+        reason: String? = nil,
+        note: String? = nil,
+        user: AppUser,
+        deviceContext: (id: String, name: String),
+        createdAt: String
+    ) -> OperationSaleAuditLog {
+        OperationSaleAuditLog(
+            sale_id: saleId,
+            sale_item_id: saleItemId,
+            return_id: returnId,
+            return_item_id: returnItemId,
+            customer_id: customerId,
+            product_id: productId,
+            location_id: locationId,
+            action_type: actionType,
+            action_scope: actionScope,
+            field_name: fieldName,
+            old_value: oldValue,
+            new_value: newValue,
+            amount: amount,
+            quantity: quantity,
+            reason: reason,
+            note: note,
+            user_id: user.id,
+            user_name: user.fullName,
+            device_id: deviceContext.id,
+            device_name: deviceContext.name,
+            created_at: createdAt
+        )
     }
 
     private func normalized(_ value: String?) -> String? {
@@ -1272,6 +1366,70 @@ private struct OperationInventoryMovement: Encodable {
     let receive_device_id: String?
     let receive_sequence: Int?
     let user_name: String?
+    let sale_id: Int?
+    let sale_item_id: Int?
+    let sale_return_id: Int64?
+    let device_id: String?
+    let device_name: String?
+    let user_id: Int?
+
+    init(
+        product_id: Int,
+        location_id: Int,
+        change_qty: Int,
+        reason: String,
+        note: String?,
+        receive_id: String?,
+        receive_device_id: String?,
+        receive_sequence: Int?,
+        user_name: String?,
+        sale_id: Int? = nil,
+        sale_item_id: Int? = nil,
+        sale_return_id: Int64? = nil,
+        device_id: String? = nil,
+        device_name: String? = nil,
+        user_id: Int? = nil
+    ) {
+        self.product_id = product_id
+        self.location_id = location_id
+        self.change_qty = change_qty
+        self.reason = reason
+        self.note = note
+        self.receive_id = receive_id
+        self.receive_device_id = receive_device_id
+        self.receive_sequence = receive_sequence
+        self.user_name = user_name
+        self.sale_id = sale_id
+        self.sale_item_id = sale_item_id
+        self.sale_return_id = sale_return_id
+        self.device_id = device_id
+        self.device_name = device_name
+        self.user_id = user_id
+    }
+}
+
+private struct OperationSaleAuditLog: Encodable {
+    let sale_id: Int?
+    let sale_item_id: Int?
+    let return_id: Int64?
+    let return_item_id: Int64?
+    let customer_id: Int?
+    let product_id: Int?
+    let location_id: Int
+    let action_type: String
+    let action_scope: String
+    let field_name: String?
+    let old_value: String?
+    let new_value: String?
+    let amount: Double?
+    let quantity: Int?
+    let reason: String?
+    let note: String?
+    let user_id: Int
+    let user_name: String
+    let device_id: String
+    let device_name: String
+    let created_at: String
 }
 
 private struct NewStoreTransfer: Encodable {
@@ -1356,6 +1514,7 @@ struct ReturnLookupSale: Decodable {
     let sale_id: Int
     let receipt_number: String?
     let returned_amount: Double?
+    let customer_id: Int?
 }
 
 struct ReturnableProductSummary: Decodable {
@@ -1408,6 +1567,7 @@ private struct NewSaleReturn: Encodable {
     let refund_amount: Double
     let reason: String
     let device_id: String
+    let device_name: String
 }
 
 private struct InsertedSaleReturn: Decodable {
@@ -1420,6 +1580,10 @@ private struct NewSaleReturnItem: Encodable {
     let product_id: Int
     let quantity: Int
     let unit_price: Double
+}
+
+private struct InsertedSaleReturnItem: Decodable {
+    let return_item_id: Int64
 }
 
 private struct SaleReturnedAmountUpdate: Encodable {

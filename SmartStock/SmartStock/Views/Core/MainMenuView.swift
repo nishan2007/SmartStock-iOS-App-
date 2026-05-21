@@ -10,12 +10,14 @@ import UIKit
 struct MainMenuView: View {
     private enum DashboardTile: String, CaseIterable, Identifiable {
         case makeSale
+        case customOrders
         case customers
         case returns
         case issues
         case endOfDay
         case sales
         case inventory
+        case customOrderItems
         case maintenance
         case receiving
         case storeTransfer
@@ -28,6 +30,7 @@ struct MainMenuView: View {
 
         static let defaultOrder: [DashboardTile] = [
             .makeSale,
+            .customOrders,
             .customers,
             .returns,
             .issues,
@@ -35,6 +38,7 @@ struct MainMenuView: View {
             .timeClock,
             .sales,
             .inventory,
+            .customOrderItems,
             .maintenance,
             .receiving,
             .storeTransfer,
@@ -233,6 +237,8 @@ struct MainMenuView: View {
         switch tile {
         case .makeSale:
             MakeSaleView()
+        case .customOrders:
+            CustomOrdersView()
         case .customers:
             CustomersView()
         case .returns:
@@ -246,6 +252,8 @@ struct MainMenuView: View {
             ViewSalesView()
         case .inventory:
             InventoryView()
+        case .customOrderItems:
+            CustomOrderItemsView()
         case .maintenance:
             MaintenanceView()
                 .environmentObject(sessionManager)
@@ -271,6 +279,12 @@ struct MainMenuView: View {
         switch tile {
         case .makeSale:
             return canAccess(.makeSale)
+        case .customOrders:
+            return canAccess(.createCustomOrder)
+                || canAccess(.manageCustomOrders)
+                || canAccess(.viewAssignedCustomOrders)
+                || canAccess(.ordersManagerDashboard)
+                || canAccess(.ordersEndOfDay)
         case .customers:
             return canAccess(.customers)
         case .returns:
@@ -283,6 +297,8 @@ struct MainMenuView: View {
             return canAccess(.viewSales)
         case .inventory:
             return canAccess(.inventory)
+        case .customOrderItems:
+            return canAccess(.customOrderItems) || canAccess(.customOrderPrintMaterials)
         case .maintenance:
             return canAccess(.maintenanceManagement)
         case .receiving:
@@ -304,6 +320,8 @@ struct MainMenuView: View {
         switch tile {
         case .makeSale:
             return "Make Sale"
+        case .customOrders:
+            return "Custom Orders"
         case .customers:
             return "Customers"
         case .returns:
@@ -316,6 +334,8 @@ struct MainMenuView: View {
             return "Sales"
         case .inventory:
             return "Inventory"
+        case .customOrderItems:
+            return "Custom Order Items"
         case .maintenance:
             return "Maintenance"
         case .receiving:
@@ -337,6 +357,8 @@ struct MainMenuView: View {
         switch tile {
         case .makeSale:
             return "Scan and checkout"
+        case .customOrders:
+            return "Entry and assignment"
         case .customers:
             return "Profiles and history"
         case .returns:
@@ -349,6 +371,8 @@ struct MainMenuView: View {
             return "Sales and return history"
         case .inventory:
             return "Stock and pricing"
+        case .customOrderItems:
+            return "Templates and stock"
         case .maintenance:
             return "Machines, parts, and tickets"
         case .receiving:
@@ -370,6 +394,8 @@ struct MainMenuView: View {
         switch tile {
         case .makeSale:
             return "cart.fill"
+        case .customOrders:
+            return "list.clipboard.fill"
         case .customers:
             return "person.2.fill"
         case .returns:
@@ -382,6 +408,8 @@ struct MainMenuView: View {
             return "chart.line.uptrend.xyaxis"
         case .inventory:
             return "shippingbox.fill"
+        case .customOrderItems:
+            return "tshirt.fill"
         case .maintenance:
             return "wrench.and.screwdriver.fill"
         case .receiving:
@@ -403,6 +431,8 @@ struct MainMenuView: View {
         switch tile {
         case .makeSale:
             return .green
+        case .customOrders:
+            return .purple
         case .customers:
             return .teal
         case .returns:
@@ -415,6 +445,8 @@ struct MainMenuView: View {
             return .blue
         case .inventory:
             return .orange
+        case .customOrderItems:
+            return .pink
         case .maintenance:
             return .mint
         case .receiving:

@@ -101,6 +101,16 @@ struct InventoryView: View {
                         }
                         .accessibilityLabel("Add item")
                     }
+
+                    if canManageCustomOrderItems {
+                        NavigationLink {
+                            CustomOrderItemsView()
+                                .environmentObject(sessionManager)
+                        } label: {
+                            Image(systemName: "tshirt.fill")
+                        }
+                        .accessibilityLabel("Custom Order Items")
+                    }
                 }
             }
             .searchable(text: $viewModel.searchText, prompt: "Search by item, SKU, barcode, store...")
@@ -157,6 +167,11 @@ struct InventoryView: View {
 
     private var canAddNewItem: Bool {
         sessionManager.currentUser?.canAccess(.addNewItem) == true
+    }
+
+    private var canManageCustomOrderItems: Bool {
+        sessionManager.currentUser?.canAccess(.customOrderItems) == true
+        || sessionManager.currentUser?.canAccess(.customOrderPrintMaterials) == true
     }
 
     private var canViewAllStoresInventory: Bool {

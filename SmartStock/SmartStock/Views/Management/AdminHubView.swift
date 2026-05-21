@@ -100,6 +100,13 @@ struct AdminHubView: View {
                 systemImage: "gearshape.2.fill",
                 tint: .orange,
                 destination: AnyView(AdminPartsView().environmentObject(sessionManager))
+            ) : nil,
+            canAccess(.companyPreferences) || canAccess(.customOrderDepositSettings) || canAccess(.customOrderRefundApprovalSettings) ? AdminHubItem(
+                title: "Company Preferences",
+                subtitle: "Custom order deposit and refund controls",
+                systemImage: "slider.horizontal.3",
+                tint: .indigo,
+                destination: AnyView(CustomOrderPreferencesView().environmentObject(sessionManager))
             ) : nil
         ].compactMap { $0 }
     }

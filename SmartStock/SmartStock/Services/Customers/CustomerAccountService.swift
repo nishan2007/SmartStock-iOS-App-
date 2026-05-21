@@ -200,6 +200,8 @@ struct NewCustomerAccountTransaction: Encodable {
     let transaction_type: String
     let note: String?
     let user_name: String
+    let device_id: String?
+    let device_name: String?
 }
 
 enum CustomerAccountService {

@@ -751,7 +751,8 @@ struct MakeSaleView: View {
                 store: store,
                 paymentMethod: paymentMethod.checkoutMethod,
                 customerAccountId: selectedCustomerAccountId,
-                paymentReference: trimmedPaymentReference
+                paymentReference: trimmedPaymentReference,
+                device: sessionManager.currentDevice
             )
 
             cart.removeAll()

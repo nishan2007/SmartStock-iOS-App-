@@ -71,7 +71,8 @@ final class CheckoutViewModel: ObservableObject {
                 store: store,
                 paymentMethod: paymentMethod,
                 customerAccountId: customerAccountId,
-                paymentReference: paymentReference
+                paymentReference: paymentReference,
+                device: nil
             )
             
             showSuccess = true

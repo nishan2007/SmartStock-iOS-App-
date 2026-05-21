@@ -97,7 +97,7 @@ struct Sale: Decodable, Identifiable {
 
     var sourceText: String {
         switch transaction_source?.lowercased() {
-        case "mobile_app":
+        case "mobile_app", "ios_app":
             return "Mobile App"
         case "java_app", "desktop_app":
             return "Desktop App"
@@ -110,7 +110,7 @@ struct Sale: Decodable, Identifiable {
 
     var sourceSystemImage: String {
         switch transaction_source?.lowercased() {
-        case "mobile_app":
+        case "mobile_app", "ios_app":
             return "iphone"
         case "java_app", "desktop_app":
             return "desktopcomputer"
