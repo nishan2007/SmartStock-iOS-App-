@@ -209,10 +209,48 @@ struct CustomOrderService {
     }
 
     func fetchCompanyPreferences(locationId: Int?) async throws -> CustomOrderCompanyPreferences {
+        let columns = """
+        company_name,
+        receipt_logo_url,
+        receipt_header_line,
+        receipt_footer_line,
+        show_receipt_logo,
+        show_sale_id_on_receipt,
+        show_device_id_on_receipt,
+        show_customer_on_receipt,
+        show_sku_on_receipt,
+        show_item_discounts_on_receipt,
+        show_payment_status_on_receipt,
+        next_receipt_counter,
+        custom_order_slip_enabled,
+        custom_order_slip_auto_print,
+        custom_order_slip_title,
+        custom_order_slip_contact_line,
+        custom_order_slip_email_line,
+        custom_order_slip_footer_note,
+        custom_order_slip_blank_detail_lines,
+        custom_order_slip_show_logo,
+        custom_order_slip_show_order_number,
+        custom_order_slip_show_due_date,
+        custom_order_slip_show_customer_phone,
+        custom_order_slip_show_customer_account,
+        custom_order_slip_show_store,
+        custom_order_slip_show_device,
+        custom_order_slip_show_cashier,
+        custom_order_slip_show_line_items,
+        custom_order_slip_show_pricing,
+        custom_order_slip_show_payment_summary,
+        custom_order_slip_show_payment_reference,
+        custom_order_slip_show_taken_by,
+        custom_order_slip_show_signatures,
+        custom_order_minimum_deposit_percent,
+        custom_order_refund_approval_limit
+        """
+
         if let locationId {
             let rows: [CustomOrderCompanyPreferences] = try await client
                 .from("company_customization")
-                .select("custom_order_minimum_deposit_percent, custom_order_refund_approval_limit")
+                .select(columns)
                 .eq("location_id", value: locationId)
                 .limit(1)
                 .execute()
@@ -222,7 +260,7 @@ struct CustomOrderService {
 
         let rows: [CustomOrderCompanyPreferences] = try await client
             .from("company_customization")
-            .select("custom_order_minimum_deposit_percent, custom_order_refund_approval_limit")
+            .select(columns)
             .is("location_id", value: nil)
             .limit(1)
             .execute()
@@ -233,6 +271,39 @@ struct CustomOrderService {
     func saveCompanyPreferences(_ preferences: CustomOrderCompanyPreferences, locationId: Int?) async throws {
         let payload = CompanyCustomizationUpsert(
             location_id: locationId,
+            company_name: preferences.companyName,
+            receipt_logo_url: preferences.receiptLogoURL,
+            receipt_header_line: preferences.receiptHeaderLine,
+            receipt_footer_line: preferences.receiptFooterLine,
+            show_receipt_logo: preferences.showReceiptLogo,
+            show_sale_id_on_receipt: preferences.showSaleIdOnReceipt,
+            show_device_id_on_receipt: preferences.showDeviceIdOnReceipt,
+            show_customer_on_receipt: preferences.showCustomerOnReceipt,
+            show_sku_on_receipt: preferences.showSkuOnReceipt,
+            show_item_discounts_on_receipt: preferences.showItemDiscountsOnReceipt,
+            show_payment_status_on_receipt: preferences.showPaymentStatusOnReceipt,
+            next_receipt_counter: preferences.nextReceiptCounter,
+            custom_order_slip_enabled: preferences.customOrderSlipEnabled,
+            custom_order_slip_auto_print: preferences.customOrderSlipAutoPrint,
+            custom_order_slip_title: preferences.customOrderSlipTitle,
+            custom_order_slip_contact_line: preferences.customOrderSlipContactLine,
+            custom_order_slip_email_line: preferences.customOrderSlipEmailLine,
+            custom_order_slip_footer_note: preferences.customOrderSlipFooterNote,
+            custom_order_slip_blank_detail_lines: preferences.customOrderSlipBlankDetailLines,
+            custom_order_slip_show_logo: preferences.customOrderSlipShowLogo,
+            custom_order_slip_show_order_number: preferences.customOrderSlipShowOrderNumber,
+            custom_order_slip_show_due_date: preferences.customOrderSlipShowDueDate,
+            custom_order_slip_show_customer_phone: preferences.customOrderSlipShowCustomerPhone,
+            custom_order_slip_show_customer_account: preferences.customOrderSlipShowCustomerAccount,
+            custom_order_slip_show_store: preferences.customOrderSlipShowStore,
+            custom_order_slip_show_device: preferences.customOrderSlipShowDevice,
+            custom_order_slip_show_cashier: preferences.customOrderSlipShowCashier,
+            custom_order_slip_show_line_items: preferences.customOrderSlipShowLineItems,
+            custom_order_slip_show_pricing: preferences.customOrderSlipShowPricing,
+            custom_order_slip_show_payment_summary: preferences.customOrderSlipShowPaymentSummary,
+            custom_order_slip_show_payment_reference: preferences.customOrderSlipShowPaymentReference,
+            custom_order_slip_show_taken_by: preferences.customOrderSlipShowTakenBy,
+            custom_order_slip_show_signatures: preferences.customOrderSlipShowSignatures,
             custom_order_minimum_deposit_percent: preferences.customOrderMinimumDepositPercent,
             custom_order_refund_approval_limit: preferences.customOrderRefundApprovalLimit
         )
@@ -251,7 +322,12 @@ struct CustomOrderService {
             return .product(product)
         }
 
-        if let customItem = try await searchCustomOrderItem(trimmed) {
+        let selection = try await searchCustomOrderItemSelection(trimmed)
+        if let customItem = selection.item, let variant = selection.variant {
+            return .customVariant(item: customItem, variant: variant)
+        }
+
+        if let customItem = selection.item {
             return .customItem(customItem)
         }
 
@@ -278,21 +354,11 @@ struct CustomOrderService {
             if let item = rows.first { return CustomOrderItemSelectionResult(item: item, variant: nil) }
         }
 
-        let directRows: [CustomOrderItem] = try await client
-            .from("custom_order_items")
-            .select(itemSelection)
-            .or("item_name.ilike.%\(trimmed)%,sku.eq.\(trimmed.uppercased()),barcode.eq.\(trimmed)")
-            .order("item_name", ascending: true)
-            .limit(1)
-            .execute()
-            .value
-
-        if let item = directRows.first { return CustomOrderItemSelectionResult(item: item, variant: nil) }
-
         let variantRows: [CustomOrderVariantLookupRow] = try await client
             .from("custom_order_item_variants")
             .select("custom_item_id, custom_variant_id")
-            .eq("sku", value: trimmed.uppercased())
+            .or("sku.eq.\(trimmed.uppercased()),barcode.eq.\(trimmed),variant_name.ilike.%\(trimmed)%")
+            .order("variant_name", ascending: true)
             .limit(1)
             .execute()
             .value
@@ -312,6 +378,17 @@ struct CustomOrderService {
                 return CustomOrderItemSelectionResult(item: item, variant: variant)
             }
         }
+
+        let directRows: [CustomOrderItem] = try await client
+            .from("custom_order_items")
+            .select(itemSelection)
+            .or("item_name.ilike.%\(trimmed)%,sku.eq.\(trimmed.uppercased()),barcode.eq.\(trimmed)")
+            .order("item_name", ascending: true)
+            .limit(1)
+            .execute()
+            .value
+
+        if let item = directRows.first { return CustomOrderItemSelectionResult(item: item, variant: nil) }
 
         let barcodeRows: [CustomOrderItemBarcodeLookup] = try await client
             .from("custom_order_item_barcodes")
@@ -335,7 +412,7 @@ struct CustomOrderService {
     }
 
     @discardableResult
-    func saveItem(_ draft: CustomOrderItemDraft, existingItemId: Int64? = nil) async throws -> Int64 {
+    func saveItem(_ draft: CustomOrderItemDraft, existingItemId: Int64? = nil) async throws -> CustomOrderItemSaveResult {
         let trimmedName = draft.itemName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedName.isEmpty else { throw CustomOrderServiceError.missingItemName }
 
@@ -346,7 +423,6 @@ struct CustomOrderService {
 
         let payload = CustomOrderItemUpsert(
             item_name: trimmedName,
-            sku: Self.generatedSku(from: [trimmedName]),
             barcode: normalized(draft.barcode),
             description: normalized(draft.description),
             product_type: draft.itemType.rawValue,
@@ -365,21 +441,29 @@ struct CustomOrderService {
         )
 
         if let existingItemId {
-            _ = try await client.from("custom_order_items").update(payload).eq("custom_item_id", value: String(existingItemId)).execute()
-            return existingItemId
-        } else {
-            let inserted: CustomOrderItemIdRow = try await client
+            let updated: CustomOrderItemSaveResult = try await client
                 .from("custom_order_items")
-                .insert(payload)
-                .select("custom_item_id")
+                .update(payload)
+                .eq("custom_item_id", value: String(existingItemId))
+                .select("custom_item_id, sku")
                 .single()
                 .execute()
                 .value
-            return inserted.custom_item_id
+            return updated
+        } else {
+            let inserted: CustomOrderItemSaveResult = try await client
+                .from("custom_order_items")
+                .insert(payload)
+                .select("custom_item_id, sku")
+                .single()
+                .execute()
+                .value
+            return inserted
         }
     }
 
-    func saveVariant(_ draft: CustomOrderVariantDraft, customItemId: Int64, existingVariantId: Int64? = nil, requiresPrice: Bool = false) async throws {
+    @discardableResult
+    func saveVariant(_ draft: CustomOrderVariantDraft, customItemId: Int64, existingVariantId: Int64? = nil, requiresPrice: Bool = false) async throws -> CustomOrderVariantSaveResult? {
         let trimmedName = draft.variantName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedName.isEmpty else { throw CustomOrderServiceError.missingVariantName }
         let fixedPrice = Double(draft.fixedPrice.trimmingCharacters(in: .whitespacesAndNewlines))
@@ -388,7 +472,6 @@ struct CustomOrderService {
         let payload = CustomOrderVariantUpsert(
             custom_item_id: customItemId,
             variant_name: trimmedName,
-            sku: Self.generatedSku(from: [draft.parentItemName, trimmedName]),
             barcode: normalized(draft.barcode),
             fixed_price: fixedPrice,
             quantity_on_hand: Double(draft.quantityOnHand.trimmingCharacters(in: .whitespacesAndNewlines)) ?? 0,
@@ -397,10 +480,24 @@ struct CustomOrderService {
             is_active: draft.isActive
         )
 
+        let savedVariant: CustomOrderVariantSaveResult?
         if let existingVariantId {
-            _ = try await client.from("custom_order_item_variants").update(payload).eq("custom_variant_id", value: String(existingVariantId)).execute()
+            savedVariant = try await client
+                .from("custom_order_item_variants")
+                .update(payload)
+                .eq("custom_variant_id", value: String(existingVariantId))
+                .select("custom_variant_id, sku")
+                .single()
+                .execute()
+                .value
         } else {
-            _ = try await client.from("custom_order_item_variants").insert(payload).execute()
+            savedVariant = try await client
+                .from("custom_order_item_variants")
+                .insert(payload)
+                .select("custom_variant_id, sku")
+                .single()
+                .execute()
+                .value
         }
 
         _ = try await client
@@ -408,6 +505,8 @@ struct CustomOrderService {
             .update(CustomOrderItemHasVariantsUpdate(has_variants: true))
             .eq("custom_item_id", value: String(customItemId))
             .execute()
+
+        return savedVariant
     }
 
     func addItemBarcode(customItemId: Int64, barcode: String) async throws {
@@ -436,6 +535,30 @@ struct CustomOrderService {
 
     func receiveCustomItems(_ items: [ReceiveCustomOrderItem], receiveNumber: ReceiveNumber, user: AppUser) async throws {
         for item in items {
+            if let variantId = item.customVariantId {
+                let rows: [CustomOrderVariantReceiveQuantityRow] = try await client
+                    .from("custom_order_item_variants")
+                    .select("custom_variant_id, custom_item_id, variant_name, quantity_on_hand")
+                    .eq("custom_variant_id", value: String(variantId))
+                    .limit(1)
+                    .execute()
+                    .value
+
+                guard let existing = rows.first else { throw CustomOrderServiceError.customItemNotFound }
+
+                _ = try await client
+                    .from("custom_order_item_variants")
+                    .update(CustomOrderQuantityUpdate(quantity_on_hand: existing.quantity_on_hand + Double(item.quantity)))
+                    .eq("custom_variant_id", value: String(variantId))
+                    .execute()
+
+                _ = try await client
+                    .from("custom_order_item_movements")
+                    .insert(CustomOrderItemMovementInsert(custom_item_id: existing.custom_item_id, change_qty: Double(item.quantity), reason: "INVENTORY_ENTRY", note: "entered_by_user_id=\(user.id)", user_name: user.fullName, receive_id: receiveNumber.receiveId, receive_device_id: receiveNumber.deviceId, receive_sequence: receiveNumber.sequence, custom_variant_id: variantId, variant_name: item.variantName ?? existing.variant_name))
+                    .execute()
+                continue
+            }
+
             let rows: [CustomOrderQuantityRow] = try await client
                 .from("custom_order_items")
                 .select("custom_item_id, quantity_on_hand")
@@ -477,6 +600,26 @@ struct CustomOrderService {
         case .all:
             return try await client.from("custom_orders").select(orderSelection).order("created_at", ascending: false).execute().value
         }
+    }
+
+    func fetchOrder(orderId: Int64) async throws -> CustomOrder {
+        try await client
+            .from("custom_orders")
+            .select(orderSelection)
+            .eq("custom_order_id", value: String(orderId))
+            .single()
+            .execute()
+            .value
+    }
+
+    func fetchCustomerAccount(customerId: Int) async throws -> CustomerAccount {
+        try await client
+            .from("customer_accounts")
+            .select("customer_id, account_number, name, phone, email, credit_limit, current_balance, is_active, is_business, account_notes, customer_type_id, created_at")
+            .eq("customer_id", value: String(customerId))
+            .single()
+            .execute()
+            .value
     }
 
     func fetchRecentLookupOrders(query: String, locationId: Int?, daysBack: Int = 30) async throws -> [CustomOrder] {
@@ -600,6 +743,13 @@ struct CustomOrderService {
         let paid = min(max(paymentAmount, 0), total)
         let balanceDue = max(total - paid, 0)
         let paymentStatus: CustomOrderPaymentStatus = paid <= 0 ? .unpaid : (balanceDue > 0 ? .partial : .paid)
+        let cashDrawer: ResolvedCashDrawer?
+        if paymentMethod == .cash, paid > 0 {
+            guard let store else { throw CashDrawerError.missingStore }
+            cashDrawer = try await CashDrawerService().resolveAssignedDrawer(storeId: store.id, deviceId: device?.id)
+        } else {
+            cashDrawer = nil
+        }
 
         let insertedOrder = try await insertCustomOrderWithRetry(
             customer: resolvedCustomer,
@@ -616,7 +766,8 @@ struct CustomOrderService {
             depositOverrideReason: depositOverrideReason,
             user: user,
             store: store,
-            device: device
+            device: device,
+            cashDrawer: cashDrawer
         )
 
         try await writeAudit(orderId: insertedOrder.custom_order_id, action: "CREATE_ORDER", fieldName: "total_amount", oldValue: nil, newValue: String(format: "%.2f", total), reason: normalized(notes), user: user, device: device)
@@ -668,7 +819,8 @@ struct CustomOrderService {
                 method: paymentMethod,
                 reference: paymentReference,
                 user: user,
-                device: device
+                device: device,
+                cashDrawer: cashDrawer
             )
             try await recordCustomOrderPaymentLedger(
                 customerId: resolvedCustomer.customerId,
@@ -678,7 +830,10 @@ struct CustomOrderService {
                 note: "Custom order payment. payment_method=\(paymentMethod.rawValue), custom_order_id=\(insertedOrder.custom_order_id), order_number=\(insertedOrder.order_number)",
                 user: user,
                 store: store,
-                device: device
+                device: device,
+                paymentMethod: paymentMethod,
+                paymentReference: paymentReference,
+                cashDrawer: cashDrawer
             )
             try await writeAudit(orderId: insertedOrder.custom_order_id, action: "ADD_PAYMENT", fieldName: "amount_paid", oldValue: "0.00", newValue: String(format: "%.2f", paid), reason: paymentMethod.title, user: user, device: device)
         }
@@ -714,7 +869,8 @@ struct CustomOrderService {
         depositOverrideReason: String?,
         user: AppUser,
         store: Store?,
-        device: TrackedDevice?
+        device: TrackedDevice?,
+        cashDrawer: ResolvedCashDrawer?
     ) async throws -> CustomOrderIdRow {
         let baseMilliseconds = Self.orderNumberMilliseconds()
         var lastError: Error?
@@ -738,7 +894,8 @@ struct CustomOrderService {
                     depositOverrideReason: depositOverrideReason,
                     user: user,
                     store: store,
-                    device: device
+                    device: device,
+                    cashDrawer: cashDrawer
                 )
             } catch {
                 guard Self.isDuplicateOrderNumberError(error) else { throw error }
@@ -765,7 +922,8 @@ struct CustomOrderService {
         depositOverrideReason: String?,
         user: AppUser,
         store: Store?,
-        device: TrackedDevice?
+        device: TrackedDevice?,
+        cashDrawer: ResolvedCashDrawer?
     ) async throws -> CustomOrderIdRow {
         try await client
             .from("custom_orders")
@@ -780,6 +938,8 @@ struct CustomOrderService {
                 total_amount: total,
                 payment_method: paymentMethod?.rawValue,
                 payment_reference: normalized(paymentReference),
+                cash_drawer_id: cashDrawer?.drawerId,
+                cash_drawer_name: cashDrawer?.drawerName,
                 payment_status: paymentStatus.rawValue,
                 amount_paid: paid,
                 balance_due: balanceDue,
@@ -856,8 +1016,15 @@ struct CustomOrderService {
             balanceReduction = min(startingBalance, amount)
             payoutAmount = max(amount - balanceReduction, 0)
         }
+        let cashDrawer: ResolvedCashDrawer?
+        if payoutAmount > 0 {
+            guard let store else { throw CashDrawerError.missingStore }
+            cashDrawer = try await CashDrawerService().resolveAssignedDrawer(storeId: store.id, deviceId: device?.id)
+        } else {
+            cashDrawer = nil
+        }
 
-        _ = try await client.from("custom_order_line_returns").insert(CustomOrderLineReturnInsert(custom_order_id: order.customOrderId, custom_order_line_id: line.customOrderLineId, custom_item_id: line.customItemId, custom_variant_id: line.variantId, item_name: line.itemName, variant_name: line.variantName, return_type: returnType, restock_action: "NO_RESTOCK", refund_amount: amount, balance_reduction: balanceReduction, payout_amount: payoutAmount, reason: trimmedReason, notes: normalized(notes), created_by_user_id: user.id, created_by_name: user.fullName, device_id: device?.id.uuidString, device_name: device?.deviceName ?? device?.modelName)).execute()
+        _ = try await client.from("custom_order_line_returns").insert(CustomOrderLineReturnInsert(custom_order_id: order.customOrderId, custom_order_line_id: line.customOrderLineId, custom_item_id: line.customItemId, custom_variant_id: line.variantId, item_name: line.itemName, variant_name: line.variantName, return_type: returnType, restock_action: "NO_RESTOCK", refund_amount: amount, balance_reduction: balanceReduction, payout_amount: payoutAmount, reason: trimmedReason, notes: normalized(notes), cash_drawer_id: cashDrawer?.drawerId, cash_drawer_name: cashDrawer?.drawerName, created_by_user_id: user.id, created_by_name: user.fullName, device_id: device?.id.uuidString, device_name: device?.deviceName ?? device?.modelName)).execute()
 
         let nextBalance = trimmedReason == "Payment Mistake" ? startingBalance + amount : max(startingBalance - balanceReduction, 0)
         let nextStatus: CustomOrderPaymentStatus = nextBalance <= 0 ? .paid : (nextBalance < order.totalAmount ? .partial : .unpaid)
@@ -872,6 +1039,13 @@ struct CustomOrderService {
     func recordPayment(order: CustomOrder, method: CustomOrderPaymentMethod, amount: Double, reference: String?, user: AppUser, store: Store?, device: TrackedDevice?) async throws {
         guard amount > 0 else { throw CustomOrderServiceError.invalidPaymentAmount }
         if method.requiresReference, normalized(reference) == nil { throw CustomOrderServiceError.paymentReferenceRequired }
+        let cashDrawer: ResolvedCashDrawer?
+        if method == .cash {
+            guard let store else { throw CashDrawerError.missingStore }
+            cashDrawer = try await CashDrawerService().resolveAssignedDrawer(storeId: store.id, deviceId: device?.id)
+        } else {
+            cashDrawer = nil
+        }
 
         let paidAmount = min(amount, order.balanceDue)
         let paymentId = try await recordCustomOrderPayment(
@@ -880,7 +1054,8 @@ struct CustomOrderService {
             method: method,
             reference: reference,
             user: user,
-            device: device
+            device: device,
+            cashDrawer: cashDrawer
         )
 
         let nextPaid = order.amountPaid + paidAmount
@@ -904,7 +1079,10 @@ struct CustomOrderService {
                 note: "Custom order payment. payment_method=\(method.rawValue), custom_order_id=\(order.customOrderId), order_number=\(order.displayNumber)",
                 user: user,
                 store: store,
-                device: device
+                device: device,
+                paymentMethod: method,
+                paymentReference: reference,
+                cashDrawer: cashDrawer
             )
             try await writeAudit(orderId: order.customOrderId, action: "ADD_PAYMENT", fieldName: "amount_paid", oldValue: String(format: "%.2f", order.amountPaid), newValue: String(format: "%.2f", nextPaid), reason: method.title, user: user, device: device)
         }
@@ -922,10 +1100,13 @@ struct CustomOrderService {
         try await writeAudit(orderId: order.customOrderId, action: "CANCEL_ORDER", fieldName: "status", oldValue: order.status.rawValue, newValue: CustomOrderStatus.cancelled.rawValue, reason: trimmedReason, user: user, device: device)
     }
 
-    func fetchEndOfDay(locationId: Int?, deviceId: String?, userId: Int?) async throws -> [CustomOrderPayment] {
+    func fetchEndOfDay(locationId: Int?, deviceId: String?, userId: Int?, cashDrawerId: Int64?, date: Date = Date()) async throws -> [CustomOrderPayment] {
+        let range = Self.dayRange(for: date)
         var query = client
             .from("custom_order_payments")
-            .select("custom_order_payment_id, custom_order_id, payment_method, payment_amount, payment_reference, payment_action, created_at, taken_by_user_id, taken_by_name, device_id, device_name, custom_orders!inner(location_id, location_name)")
+            .select("custom_order_payment_id, custom_order_id, payment_method, payment_amount, payment_reference, cash_drawer_id, cash_drawer_name, payment_action, created_at, taken_by_user_id, taken_by_name, device_id, device_name, custom_orders!inner(location_id, location_name)")
+            .gte("created_at", value: range.start)
+            .lt("created_at", value: range.end)
 
         if let locationId {
             query = query.eq("custom_orders.location_id", value: locationId)
@@ -936,14 +1117,44 @@ struct CustomOrderService {
         if let userId {
             query = query.eq("taken_by_user_id", value: userId)
         }
+        if let cashDrawerId {
+            query = query.eq("cash_drawer_id", value: String(cashDrawerId))
+        }
 
         return try await query.order("created_at", ascending: false).execute().value
     }
 
-    func fetchEndOfDayReturns(locationId: Int?, deviceId: String?, userId: Int?) async throws -> [CustomOrderEndOfDayReturn] {
+    func fetchEndOfDaySales(locationId: Int?, deviceId: String?, userId: Int?, cashDrawerId: Int64?, date: Date = Date()) async throws -> [CustomOrderEndOfDaySale] {
+        let range = Self.dayRange(for: date)
+        var query = client
+            .from("custom_orders")
+            .select("custom_order_id, order_number, total_amount, amount_paid, balance_due, payment_status, cash_drawer_id, cash_drawer_name, created_at")
+            .gte("created_at", value: range.start)
+            .lt("created_at", value: range.end)
+
+        if let locationId {
+            query = query.eq("location_id", value: locationId)
+        }
+        if let deviceId, !deviceId.isEmpty {
+            query = query.eq("device_id", value: deviceId)
+        }
+        if let userId {
+            query = query.eq("taken_by_user_id", value: userId)
+        }
+        if let cashDrawerId {
+            query = query.eq("cash_drawer_id", value: String(cashDrawerId))
+        }
+
+        return try await query.order("created_at", ascending: false).execute().value
+    }
+
+    func fetchEndOfDayReturns(locationId: Int?, deviceId: String?, userId: Int?, cashDrawerId: Int64?, date: Date = Date()) async throws -> [CustomOrderEndOfDayReturn] {
+        let range = Self.dayRange(for: date)
         var query = client
             .from("custom_order_line_returns")
-            .select("custom_order_line_return_id, custom_order_id, custom_order_line_id, item_name, variant_name, refund_amount, balance_reduction, payout_amount, reason, created_by_user_id, created_by_name, device_id, device_name, created_at, custom_orders!inner(location_id, location_name)")
+            .select("custom_order_line_return_id, custom_order_id, custom_order_line_id, item_name, variant_name, refund_amount, balance_reduction, payout_amount, reason, cash_drawer_id, cash_drawer_name, created_by_user_id, created_by_name, device_id, device_name, created_at, custom_orders!inner(location_id, location_name)")
+            .gte("created_at", value: range.start)
+            .lt("created_at", value: range.end)
 
         if let locationId {
             query = query.eq("custom_orders.location_id", value: locationId)
@@ -954,8 +1165,19 @@ struct CustomOrderService {
         if let userId {
             query = query.eq("created_by_user_id", value: userId)
         }
+        if let cashDrawerId {
+            query = query.eq("cash_drawer_id", value: String(cashDrawerId))
+        }
 
         return try await query.order("created_at", ascending: false).execute().value
+    }
+
+    private static func dayRange(for date: Date) -> (start: String, end: String) {
+        let calendar = Calendar.current
+        let startOfDay = calendar.startOfDay(for: date)
+        let endOfDay = calendar.date(byAdding: .day, value: 1, to: startOfDay) ?? date
+        let formatter = ISO8601DateFormatter()
+        return (formatter.string(from: startOfDay), formatter.string(from: endOfDay))
     }
 
     private var itemSelection: String {
@@ -995,6 +1217,10 @@ struct CustomOrderService {
         customer_phone,
         status,
         payment_status,
+        payment_method,
+        payment_reference,
+        cash_drawer_id,
+        cash_drawer_name,
         due_date,
         order_notes,
         total_amount,
@@ -1018,7 +1244,7 @@ struct CustomOrderService {
         completed_at,
         created_at,
         updated_at,
-        custom_order_payments(custom_order_payment_id, custom_order_id, payment_method, payment_amount, payment_reference, created_at, taken_by_name),
+        custom_order_payments(custom_order_payment_id, custom_order_id, payment_method, payment_amount, payment_reference, cash_drawer_id, cash_drawer_name, created_at, taken_by_name),
         custom_order_lines(custom_order_line_id, custom_order_id, custom_item_id, custom_variant_id, item_name, variant_name, pricing_type, unit_price, original_line_total, line_discount_percent, line_discount_amount, line_discount_by_name, line_discount_reason, line_total, original_base_price, price_override_price, price_override_reason, price_override_by_name, width_value, length_value, dimension_unit, area_value, area_unit, area_price, base_item_price, customization_details, order_instructions, delivery_status, delivered_at, delivered_by_name, production_status, production_updated_at, production_updated_by_name, sort_order, created_at, custom_order_line_print_addons(custom_order_line_print_addon_id, print_material_name, print_size_name, pricing_mode, print_description, print_charge, print_line_count), custom_order_line_returns(custom_order_line_return_id, custom_order_line_id, return_type, refund_amount, balance_reduction, payout_amount, reason, created_at, created_by_name))
         """
     }
@@ -1030,11 +1256,12 @@ struct CustomOrderService {
         method: CustomOrderPaymentMethod,
         reference: String?,
         user: AppUser,
-        device: TrackedDevice?
+        device: TrackedDevice?,
+        cashDrawer: ResolvedCashDrawer?
     ) async throws -> String {
         let inserted: CustomOrderPaymentIdRow = try await client
             .from("custom_order_payments")
-            .insert(CustomOrderPaymentInsert(custom_order_id: orderId, payment_amount: amount, payment_method: method.rawValue, payment_reference: normalized(reference), taken_by_user_id: user.id, taken_by_name: user.fullName, payment_action: "PAYMENT", device_id: device?.id.uuidString, device_name: device?.deviceName ?? device?.modelName))
+            .insert(CustomOrderPaymentInsert(custom_order_id: orderId, payment_amount: amount, payment_method: method.rawValue, payment_reference: normalized(reference), cash_drawer_id: cashDrawer?.drawerId, cash_drawer_name: cashDrawer?.drawerName, taken_by_user_id: user.id, taken_by_name: user.fullName, payment_action: "PAYMENT", device_id: device?.id.uuidString, device_name: device?.deviceName ?? device?.modelName))
             .select("custom_order_payment_id")
             .single()
             .execute()
@@ -1051,9 +1278,12 @@ struct CustomOrderService {
         note: String?,
         user: AppUser,
         store: Store?,
-        device: TrackedDevice?
+        device: TrackedDevice?,
+        paymentMethod: CustomOrderPaymentMethod,
+        paymentReference: String?,
+        cashDrawer: ResolvedCashDrawer?
     ) async throws {
-        _ = try await client.from("customer_account_transactions").insert(CustomerAccountTransactionInsert(customer_id: customerId, sale_id: nil, amount: amount, transaction_type: "CUSTOM_ORDER_PAID", note: normalized(note), payment_id: paymentId, user_name: user.fullName, location_id: store?.id, custom_order_id: orderId, device_id: device?.id.uuidString, device_name: device?.deviceName ?? device?.modelName)).execute()
+        _ = try await client.from("customer_account_transactions").insert(CustomerAccountTransactionInsert(customer_id: customerId, sale_id: nil, amount: amount, transaction_type: "CUSTOM_ORDER_PAID", note: normalized(note), payment_id: paymentId, payment_method: paymentMethod.rawValue, payment_reference: normalized(paymentReference), cash_drawer_id: cashDrawer?.drawerId, cash_drawer_name: cashDrawer?.drawerName, user_name: user.fullName, location_id: store?.id, custom_order_id: orderId, device_id: device?.id.uuidString, device_name: device?.deviceName ?? device?.modelName)).execute()
     }
 
     private func chargeCustomOrderBalanceToAccount(customerId: Int, orderId: Int64, amount: Double, note: String?, user: AppUser, store: Store?, device: TrackedDevice?) async throws {
@@ -1163,47 +1393,6 @@ struct CustomOrderService {
         return trimmed.isEmpty ? nil : trimmed
     }
 
-    nonisolated static func generatedSku(from parts: [String]) -> String {
-        let segments = parts
-            .flatMap { part in
-                part
-                    .folding(options: [.diacriticInsensitive, .widthInsensitive], locale: .current)
-                    .uppercased()
-                    .components(separatedBy: CharacterSet.alphanumerics.inverted)
-                    .filter { !$0.isEmpty }
-                    .map(Self.abbreviatedSkuWord)
-            }
-            .filter { !$0.isEmpty }
-
-        return "CO-\(segments.isEmpty ? "ITEM" : segments.joined(separator: "-"))"
-    }
-
-    private nonisolated static func abbreviatedSkuWord(_ word: String) -> String {
-        let known: [String: String] = [
-            "ADHESIVE": "ADH",
-            "BANNER": "BNR",
-            "CANVAS": "CNV",
-            "GLOSSY": "GLSY",
-            "MATTE": "MAT",
-            "MEDIUM": "MED",
-            "PURPLE": "PRPL",
-            "SHIRT": "SHRT",
-            "SMALL": "SML",
-            "VINYL": "VNL"
-        ]
-        if let abbreviation = known[word] { return abbreviation }
-        if word.count <= 4 { return word }
-
-        let vowels = CharacterSet(charactersIn: "AEIOU")
-        let characters = Array(word)
-        let first = String(characters[0])
-        let consonants = characters.dropFirst().filter { character in
-            String(character).rangeOfCharacter(from: vowels) == nil
-        }
-        let abbreviation = (first + consonants.map(String.init).joined()).prefix(4)
-        return abbreviation.count >= 3 ? String(abbreviation) : String(word.prefix(4))
-    }
-
     private static let dateFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.calendar = Calendar(identifier: .gregorian)
@@ -1230,6 +1419,7 @@ struct CustomOrderService {
 enum ReceivingLookupItem {
     case product(ScannedProduct)
     case customItem(CustomOrderItem)
+    case customVariant(item: CustomOrderItem, variant: CustomOrderItemVariant)
 }
 
 struct CustomOrderItemSelectionResult {
@@ -1239,6 +1429,8 @@ struct CustomOrderItemSelectionResult {
 
 struct ReceiveCustomOrderItem {
     let customItemId: Int64
+    var customVariantId: Int64? = nil
+    var variantName: String? = nil
     let itemName: String
     let quantity: Int
 }
@@ -1300,13 +1492,45 @@ enum CustomOrderServiceError: LocalizedError {
 
 private struct CompanyCustomizationUpsert: Encodable {
     let location_id: Int?
+    let company_name: String
+    let receipt_logo_url: String
+    let receipt_header_line: String
+    let receipt_footer_line: String
+    let show_receipt_logo: Bool
+    let show_sale_id_on_receipt: Bool
+    let show_device_id_on_receipt: Bool
+    let show_customer_on_receipt: Bool
+    let show_sku_on_receipt: Bool
+    let show_item_discounts_on_receipt: Bool
+    let show_payment_status_on_receipt: Bool
+    let next_receipt_counter: Int
+    let custom_order_slip_enabled: Bool
+    let custom_order_slip_auto_print: Bool
+    let custom_order_slip_title: String
+    let custom_order_slip_contact_line: String
+    let custom_order_slip_email_line: String
+    let custom_order_slip_footer_note: String
+    let custom_order_slip_blank_detail_lines: Int
+    let custom_order_slip_show_logo: Bool
+    let custom_order_slip_show_order_number: Bool
+    let custom_order_slip_show_due_date: Bool
+    let custom_order_slip_show_customer_phone: Bool
+    let custom_order_slip_show_customer_account: Bool
+    let custom_order_slip_show_store: Bool
+    let custom_order_slip_show_device: Bool
+    let custom_order_slip_show_cashier: Bool
+    let custom_order_slip_show_line_items: Bool
+    let custom_order_slip_show_pricing: Bool
+    let custom_order_slip_show_payment_summary: Bool
+    let custom_order_slip_show_payment_reference: Bool
+    let custom_order_slip_show_taken_by: Bool
+    let custom_order_slip_show_signatures: Bool
     let custom_order_minimum_deposit_percent: Double
     let custom_order_refund_approval_limit: Double
 }
 
 private struct CustomOrderItemUpsert: Encodable {
     let item_name: String
-    let sku: String
     let barcode: String?
     let description: String?
     let product_type: String
@@ -1327,7 +1551,6 @@ private struct CustomOrderItemUpsert: Encodable {
 private struct CustomOrderVariantUpsert: Encodable {
     let custom_item_id: Int64
     let variant_name: String
-    let sku: String
     let barcode: String?
     let fixed_price: Double?
     let quantity_on_hand: Double
@@ -1340,13 +1563,28 @@ private struct CustomOrderItemHasVariantsUpdate: Encodable {
     let has_variants: Bool
 }
 
-private struct CustomOrderItemIdRow: Decodable { let custom_item_id: Int64 }
+struct CustomOrderItemSaveResult: Decodable {
+    let custom_item_id: Int64
+    let sku: String?
+}
+
+struct CustomOrderVariantSaveResult: Decodable {
+    let custom_variant_id: Int64
+    let sku: String?
+}
+
 private struct CustomOrderItemBarcodeInsert: Encodable { let custom_item_id: Int64; let barcode: String }
 private struct CustomOrderItemActiveUpdate: Encodable { let is_active: Bool }
 private struct CustomOrderItemBarcodeLookup: Decodable { let custom_item_id: Int64 }
 private struct CustomOrderVariantLookupRow: Decodable { let custom_item_id: Int64; let custom_variant_id: Int64 }
 private struct CustomOrderQuantityRow: Decodable { let custom_item_id: Int64; let quantity_on_hand: Double }
 private struct CustomOrderQuantityUpdate: Encodable { let quantity_on_hand: Double }
+private struct CustomOrderVariantReceiveQuantityRow: Decodable {
+    let custom_variant_id: Int64
+    let custom_item_id: Int64
+    let variant_name: String
+    let quantity_on_hand: Double
+}
 
 private struct CustomOrderPrintMaterialUpsert: Encodable {
     let material_name: String
@@ -1421,6 +1659,8 @@ private struct CustomOrderInsert: Encodable {
     let total_amount: Double
     let payment_method: String?
     let payment_reference: String?
+    let cash_drawer_id: Int64?
+    let cash_drawer_name: String?
     let payment_status: String
     let amount_paid: Double
     let balance_due: Double
@@ -1534,6 +1774,8 @@ private struct CustomOrderPaymentInsert: Encodable {
     let payment_amount: Double
     let payment_method: String
     let payment_reference: String?
+    let cash_drawer_id: Int64?
+    let cash_drawer_name: String?
     let taken_by_user_id: Int
     let taken_by_name: String
     let payment_action: String
@@ -1548,6 +1790,10 @@ private struct CustomerAccountTransactionInsert: Encodable {
     let transaction_type: String
     let note: String?
     let payment_id: String?
+    let payment_method: String?
+    let payment_reference: String?
+    let cash_drawer_id: Int64?
+    let cash_drawer_name: String?
     let user_name: String
     let location_id: Int?
     let custom_order_id: Int64
@@ -1688,6 +1934,8 @@ private struct CustomOrderLineReturnInsert: Encodable {
     let payout_amount: Double
     let reason: String
     let notes: String?
+    let cash_drawer_id: Int64?
+    let cash_drawer_name: String?
     let created_by_user_id: Int
     let created_by_name: String
     let device_id: String?

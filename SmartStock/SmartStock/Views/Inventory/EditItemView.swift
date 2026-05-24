@@ -126,7 +126,7 @@ struct EditItemView: View {
 
     private func itemRow(_ item: InventoryItem) -> some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(item.name)
+            Text(item.displayName)
                 .font(.headline)
             Text("\(item.sku) - \(item.locationName)")
                 .font(.caption)

@@ -39,6 +39,7 @@ struct InventoryEditorService {
                 """
                 product_id,
                 name,
+                size,
                 sku,
                 barcode,
                 description,
@@ -66,7 +67,7 @@ struct InventoryEditorService {
         return draft
     }
 
-    func save(draft: InventoryItemDraft, selectedImage: UIImage?, user: AppUser?) async throws {
+    func save(draft: InventoryItemDraft, selectedImage: UIImage?, user: AppUser?) async throws -> String? {
         var draft = draft
         if let selectedImage {
             draft.imageURL = try await ProductImageService.upload(image: selectedImage)
@@ -76,15 +77,17 @@ struct InventoryEditorService {
 
         if let productId = draft.productId {
             try await update(productId: productId, draft: draft, user: user)
+            return nil
         } else {
-            try await create(draft: draft, user: user)
+            return try await create(draft: draft, user: user)
         }
     }
 
-    private func create(draft: InventoryItemDraft, user: AppUser?) async throws {
+    private func create(draft: InventoryItemDraft, user: AppUser?) async throws -> String? {
         let product = ProductInsert(
             name: draft.name.trimmed,
-            sku: draft.sku.trimmed,
+            size: draft.size.trimmed.nilIfEmpty,
+            sku: draft.sku.trimmed.nilIfEmpty,
             barcode: draft.barcode.trimmed,
             description: draft.description.trimmed,
             cost_price: try draft.costPrice.decimalValue(fieldName: "Cost price"),
@@ -100,7 +103,7 @@ struct InventoryEditorService {
         let inserted: InsertedProduct = try await supabase
             .from("products")
             .insert(product)
-            .select("product_id")
+            .select("product_id, name, size, sku")
             .single()
             .execute()
             .value
@@ -128,12 +131,14 @@ struct InventoryEditorService {
         }
 
         try await replaceBarcodes(productId: inserted.product_id, draft: draft)
+        return inserted.sku
     }
 
     private func update(productId: Int, draft: InventoryItemDraft, user: AppUser?) async throws {
         let update = ProductUpdate(
             name: draft.name.trimmed,
-            sku: draft.sku.trimmed,
+            size: draft.size.trimmed.nilIfEmpty,
+            sku: draft.sku.trimmed.nilIfEmpty,
             barcode: draft.barcode.trimmed,
             description: draft.description.trimmed,
             cost_price: try draft.costPrice.decimalValue(fieldName: "Cost price"),
@@ -262,11 +267,10 @@ struct InventoryEditorService {
 
     private func validate(_ draft: InventoryItemDraft) throws {
         guard !draft.name.trimmed.isEmpty,
-              !draft.sku.trimmed.isEmpty,
               !draft.barcode.trimmed.isEmpty,
               !draft.costPrice.trimmed.isEmpty,
               !draft.price.trimmed.isEmpty else {
-            throw InventoryEditorError.validation("Name, SKU, barcode, cost price, and price are required.")
+            throw InventoryEditorError.validation("Name, barcode, cost price, and price are required.")
         }
 
         _ = try draft.costPrice.decimalValue(fieldName: "Cost price")
@@ -310,7 +314,8 @@ enum InventoryEditorError: LocalizedError {
 private struct EditableProductDTO: Decodable {
     let product_id: Int
     let name: String
-    let sku: String
+    let size: String?
+    let sku: String?
     let barcode: String?
     let description: String?
     let cost_price: Decimal?
@@ -326,7 +331,8 @@ private struct EditableProductDTO: Decodable {
         var draft = InventoryItemDraft()
         draft.productId = product_id
         draft.name = name
-        draft.sku = sku
+        draft.size = size ?? ""
+        draft.sku = sku ?? ""
         draft.barcode = barcode ?? ""
         draft.description = description ?? ""
         draft.costPrice = cost_price.map { String(describing: $0) } ?? ""
@@ -350,6 +356,9 @@ private struct EditableInventoryDTO: Decodable {
 
 private struct InsertedProduct: Decodable {
     let product_id: Int
+    let name: String
+    let size: String?
+    let sku: String?
 }
 
 private struct QuantityDTO: Decodable {
@@ -362,7 +371,8 @@ private struct ProductBarcodeDTO: Decodable {
 
 private struct ProductInsert: Encodable {
     let name: String
-    let sku: String
+    let size: String?
+    let sku: String?
     let barcode: String
     let description: String
     let cost_price: Decimal
@@ -377,7 +387,8 @@ private struct ProductInsert: Encodable {
 
 private struct ProductUpdate: Encodable {
     let name: String
-    let sku: String
+    let size: String?
+    let sku: String?
     let barcode: String
     let description: String
     let cost_price: Decimal

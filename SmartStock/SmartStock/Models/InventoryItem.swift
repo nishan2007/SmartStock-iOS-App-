@@ -11,6 +11,7 @@ struct InventoryItem: Identifiable, Hashable {
     let id: String
     let productId: Int
     let name: String
+    let size: String?
     let sku: String
     let barcode: String?
     let additionalBarcodes: [String]
@@ -32,6 +33,7 @@ struct InventoryItem: Identifiable, Hashable {
         id: String? = nil,
         productId: Int,
         name: String,
+        size: String? = nil,
         sku: String,
         barcode: String? = nil,
         additionalBarcodes: [String] = [],
@@ -52,6 +54,7 @@ struct InventoryItem: Identifiable, Hashable {
         self.productId = productId
         self.id = id ?? "\(productId)-\(locationId)"
         self.name = name
+        self.size = size
         self.sku = sku
         self.barcode = barcode
         self.additionalBarcodes = additionalBarcodes
@@ -88,6 +91,15 @@ struct InventoryItem: Identifiable, Hashable {
 
     var quantityText: String { "\(quantity)" }
     var reorderLevelText: String { "\(reorderLevel)" }
+
+    var displayName: String {
+        displayProductName(name: name, size: size)
+    }
+
+    var sizeText: String {
+        let trimmed = (size ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? "—" : trimmed
+    }
 
     var formattedCostPrice: String {
         guard let costPrice else { return "—" }

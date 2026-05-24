@@ -4,113 +4,114 @@
 //
 
 import Foundation
-import UIKit
+import Supabase
 
 @MainActor
 final class ReceiptNumberManager {
     static let shared = ReceiptNumberManager()
 
-    private enum StorageKey {
-        static let receiptDeviceId = "smartstock.receipt-device-id"
-        static let nextReceiptSequencePrefix = "smartstock.next-receipt-sequence"
-        static let nextReceiveSequencePrefix = "smartstock.next-receive-sequence"
-    }
-
-    private let defaults: UserDefaults
+    private let client = supabase
     private let receiptSequencePadding = 6
 
-    init(defaults: UserDefaults = .standard) {
-        self.defaults = defaults
-    }
+    private init() {}
 
-    func nextReceipt(for locationId: Int) -> ReceiptNumber {
-        let deviceId = currentDeviceId()
-        let storeCode = formatStoreCode(locationId)
-        let sequenceKey = "\(StorageKey.nextReceiptSequencePrefix).\(storeCode).\(deviceId)"
-        let sequence = max(defaults.integer(forKey: sequenceKey), 1)
-
-        defaults.set(sequence + 1, forKey: sequenceKey)
+    func nextReceipt(for locationId: Int) async throws -> ReceiptNumber {
+        let storeCode = try await fetchStoreCode(locationId: locationId)
+        let deviceCode = try await fetchCurrentDeviceCode()
+        let sequence = try await nextStoreSequence(locationId: locationId)
 
         return ReceiptNumber(
-            receiptNumber: formatReceiptNumber(storeCode: storeCode, deviceId: deviceId, sequence: sequence),
-            deviceId: deviceId,
+            receiptNumber: formatReceiptNumber(storeCode: storeCode, deviceId: deviceCode, sequence: sequence),
+            deviceId: deviceCode,
             sequence: sequence
         )
     }
 
-    func nextReceive(for locationId: Int) -> ReceiveNumber {
-        let deviceId = currentDeviceId()
-        let storeCode = formatStoreCode(locationId)
-        let sequenceKey = "\(StorageKey.nextReceiveSequencePrefix).\(storeCode).\(deviceId)"
-        let sequence = max(defaults.integer(forKey: sequenceKey), 1)
-
-        defaults.set(sequence + 1, forKey: sequenceKey)
+    func nextReceive(for locationId: Int) async throws -> ReceiveNumber {
+        let storeCode = try await fetchStoreCode(locationId: locationId)
+        let deviceCode = try await fetchCurrentDeviceCode()
+        let sequence = try await nextStoreSequence(locationId: locationId)
 
         return ReceiveNumber(
-            receiveId: formatReceiveNumber(storeCode: storeCode, deviceId: deviceId, sequence: sequence),
-            deviceId: deviceId,
+            receiveId: formatReceiveNumber(storeCode: storeCode, deviceId: deviceCode, sequence: sequence),
+            deviceId: deviceCode,
             sequence: sequence
         )
-    }
-
-    func currentDeviceId() -> String {
-        if let existing = KeychainHelper.string(for: StorageKey.receiptDeviceId) {
-            let sanitized = sanitizeDeviceId(existing)
-            if !sanitized.isEmpty {
-                if sanitized != existing {
-                    KeychainHelper.set(sanitized, for: StorageKey.receiptDeviceId)
-                }
-                return sanitized
-            }
-        }
-
-        let fallback = sanitizeDeviceId("POS-\(UIDevice.current.name)")
-        let deviceId = fallback.isEmpty ? "POS-LOCAL" : fallback
-        KeychainHelper.set(deviceId, for: StorageKey.receiptDeviceId)
-        return deviceId
     }
 
     func previewSanitizedDeviceId(_ value: String) -> String {
-        sanitizeDeviceId(value)
+        sanitizeCode(value)
     }
 
-    @discardableResult
-    func updateDeviceId(_ value: String) throws -> String {
-        let sanitized = sanitizeDeviceId(value)
-        guard !sanitized.isEmpty else {
-            throw ReceiptNumberManagerError.invalidDeviceName
-        }
+    private func fetchStoreCode(locationId: Int) async throws -> String {
+        let rows: [ReceiptStoreCodeRow] = try await client
+            .from("locations")
+            .select("receipt_store_code")
+            .eq("location_id", value: locationId)
+            .limit(1)
+            .execute()
+            .value
 
-        KeychainHelper.set(sanitized, for: StorageKey.receiptDeviceId)
+        guard let row = rows.first else {
+            throw ReceiptNumberManagerError.missingStoreCode
+        }
+        let sanitized = sanitizeCode(row.receipt_store_code)
+        guard !sanitized.isEmpty else {
+            throw ReceiptNumberManagerError.missingStoreCode
+        }
         return sanitized
     }
 
-    private func formatStoreCode(_ locationId: Int) -> String {
-        String(format: "S%03d", locationId)
+    private func fetchCurrentDeviceCode() async throws -> String {
+        let rows: [ReceiptDeviceCodeRow] = try await client
+            .from("devices")
+            .select("receipt_device_code")
+            .eq("installation_id", value: DeviceService.shared.currentInstallationId())
+            .eq("is_blocked", value: false)
+            .eq("is_approved", value: true)
+            .order("last_seen", ascending: false)
+            .limit(1)
+            .execute()
+            .value
+
+        guard let row = rows.first else {
+            throw ReceiptNumberManagerError.missingDeviceCode
+        }
+        let sanitized = sanitizeCode(row.receipt_device_code)
+        guard !sanitized.isEmpty else {
+            throw ReceiptNumberManagerError.missingDeviceCode
+        }
+        return sanitized
+    }
+
+    private func nextStoreSequence(locationId: Int) async throws -> Int {
+        let rows: [ReceiptCounterRPCRow] = try await client
+            .rpc(
+                "next_store_receipt_counter",
+                params: ReceiptCounterRPCParams(p_location_id: locationId)
+            )
+            .execute()
+            .value
+
+        guard let row = rows.first, row.sequence >= 1 else {
+            throw ReceiptNumberManagerError.counterAdvanceFailed
+        }
+        return row.sequence
     }
 
     private func formatReceiptNumber(storeCode: String, deviceId: String, sequence: Int) -> String {
-        "R-\(storeCode)-\(deviceId)-" + String(format: "%0\(receiptSequencePadding)d", sequence)
+        "\(storeCode)-\(deviceId)-" + String(format: "%0\(receiptSequencePadding)d", sequence)
     }
 
     private func formatReceiveNumber(storeCode: String, deviceId: String, sequence: Int) -> String {
-        "RCV-\(storeCode)-\(deviceId)-" + String(format: "%0\(receiptSequencePadding)d", sequence)
+        "\(storeCode)-\(deviceId)-" + String(format: "%0\(receiptSequencePadding)d", sequence)
     }
 
-    private func sanitizeDeviceId(_ value: String?) -> String {
+    private func sanitizeCode(_ value: String?) -> String {
         guard let value else { return "" }
-
-        let uppercased = value.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
-        guard !uppercased.isEmpty else { return "" }
-
-        let replaced = uppercased.replacingOccurrences(
-            of: "[^A-Z0-9-]+",
-            with: "-",
-            options: .regularExpression
-        )
-        let collapsed = replaced.replacingOccurrences(of: "-+", with: "-", options: .regularExpression)
-
-        return collapsed.trimmingCharacters(in: CharacterSet(charactersIn: "-"))
+        let digits = value.replacingOccurrences(of: "\\D+", with: "", options: .regularExpression)
+        guard let parsed = Int(digits), parsed > 0 else { return "" }
+        return String(format: "%04d", min(parsed, 9999))
     }
 }
 
@@ -126,13 +127,35 @@ struct ReceiveNumber: Equatable {
     let sequence: Int
 }
 
+private struct ReceiptStoreCodeRow: Decodable {
+    let receipt_store_code: String
+}
+
+private struct ReceiptDeviceCodeRow: Decodable {
+    let receipt_device_code: String
+}
+
+private struct ReceiptCounterRPCParams: Encodable {
+    let p_location_id: Int
+}
+
+private struct ReceiptCounterRPCRow: Decodable {
+    let sequence: Int
+}
+
 enum ReceiptNumberManagerError: LocalizedError {
-    case invalidDeviceName
+    case missingStoreCode
+    case missingDeviceCode
+    case counterAdvanceFailed
 
     var errorDescription: String? {
         switch self {
-        case .invalidDeviceName:
-            return "Enter a device name with at least one letter or number."
+        case .missingStoreCode:
+            return "Store receipt code is missing. Set it in Company Preferences > Locations."
+        case .missingDeviceCode:
+            return "Device receipt code is missing. Set it in Device Management."
+        case .counterAdvanceFailed:
+            return "Unable to advance the store receipt counter."
         }
     }
 }

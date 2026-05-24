@@ -304,6 +304,11 @@ private struct LineDiscountSheetSelection: Identifiable {
     let line: CustomOrderDraftLine
 }
 
+private enum CustomOrderOverrideAction {
+    case lineDiscount(lineIndex: Int, percent: Double, reason: String)
+    case addLine(line: CustomOrderDraftLine)
+}
+
 private enum CustomOrderEntryStep: String, CaseIterable, Identifiable {
     case lines = "Lines"
     case review = "Review"
@@ -357,8 +362,20 @@ private struct CustomOrderEntryView: View {
     @State private var isSaving = false
     @State private var errorMessage: String?
     @State private var createdOrderMessage: String?
+    @State private var createdSlipPayload: CustomOrderSlipPayload?
     @State private var currentStep: CustomOrderEntryStep = .lines
     @State private var isPrintAddonsSheetPresented = false
+    @State private var pendingOverrideAction: CustomOrderOverrideAction?
+    @State private var overrideApproverIdentifier = ""
+    @State private var overrideApproverPassword = ""
+    @State private var overrideReason = ""
+    @State private var overrideErrorMessage: String?
+    @State private var isApprovingOverride = false
+    private let overrideApprovalService = OverrideApprovalService()
+
+    private func can(_ permission: MobilePermission) -> Bool {
+        sessionManager.currentUser?.canAccess(permission) == true
+    }
 
     var body: some View {
         ScrollView {
@@ -371,6 +388,25 @@ private struct CustomOrderEntryView: View {
                 }
                 if let createdOrderMessage {
                     statusMessage(createdOrderMessage, tint: .green)
+                }
+                if createdSlipPayload != nil {
+                    HStack(spacing: 10) {
+                        Button {
+                            Task { await printCreatedSlip(format: .letter) }
+                        } label: {
+                            Label("Print Letter Slip", systemImage: "doc.text")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.bordered)
+
+                        Button {
+                            Task { await printCreatedSlip(format: .fortyColumn) }
+                        } label: {
+                            Label("Print 40-Col Slip", systemImage: "printer")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.bordered)
+                    }
                 }
 
                 currentStepContent
@@ -397,6 +433,9 @@ private struct CustomOrderEntryView: View {
                         }
                     }
             }
+        }
+        .sheet(isPresented: isShowingOverrideSheet) {
+            overrideSheet
         }
     }
 
@@ -939,12 +978,7 @@ private struct CustomOrderEntryView: View {
 
     private func loadLookups() async {
         do {
-            async let customers: [CustomerAccount] = supabase
-                .from("customer_accounts")
-                .select("customer_id, account_number, name, phone, email, credit_limit, current_balance, is_active, is_business, account_notes, customer_type_id, created_at")
-                .order("name", ascending: true)
-                .execute()
-                .value
+            async let customers = CustomerAccountService.fetchCustomers()
             async let items = service.fetchItems(activeOnly: true)
             async let materials = service.fetchPrintMaterials(activeOnly: true)
             async let presets = service.fetchPrintSizePresets(activeOnly: true)
@@ -1210,6 +1244,19 @@ private struct CustomOrderEntryView: View {
             return
         }
 
+        if percent > 0, !can(.customOrderLineDiscount) {
+            pendingOverrideAction = .lineDiscount(
+                lineIndex: discountSelection.lineIndex,
+                percent: percent,
+                reason: trimmedReason
+            )
+            overrideApproverIdentifier = ""
+            overrideApproverPassword = ""
+            overrideReason = ""
+            overrideErrorMessage = nil
+            return
+        }
+
         lines[discountSelection.lineIndex].discountPercentText = percent == 0 ? "" : String(format: "%.2f", percent)
         lines[discountSelection.lineIndex].discountReason = percent == 0 ? "" : trimmedReason
         discountErrorMessage = nil
@@ -1241,6 +1288,15 @@ private struct CustomOrderEntryView: View {
             return
         }
 
+        if draftLine.hasPriceOverride && !can(.customOrderOverrides) {
+            pendingOverrideAction = .addLine(line: draftLine)
+            overrideApproverIdentifier = ""
+            overrideApproverPassword = ""
+            overrideReason = ""
+            overrideErrorMessage = nil
+            return
+        }
+
         for _ in 0..<quantity {
             lines.append(draftLine.singleQuantityCopy())
         }
@@ -1252,11 +1308,131 @@ private struct CustomOrderEntryView: View {
         errorMessage = nil
     }
 
+    private var isShowingOverrideSheet: Binding<Bool> {
+        Binding {
+            pendingOverrideAction != nil
+        } set: { isPresented in
+            if !isPresented {
+                pendingOverrideAction = nil
+                overrideErrorMessage = nil
+            }
+        }
+    }
+
+    private var requiredPermissionForPendingOverride: MobilePermission? {
+        guard let pendingOverrideAction else { return nil }
+        switch pendingOverrideAction {
+        case .lineDiscount:
+            return .customOrderLineDiscount
+        case .addLine:
+            return .customOrderOverrides
+        }
+    }
+
+    private func applyPendingOverrideAction() {
+        guard let pendingOverrideAction else { return }
+        switch pendingOverrideAction {
+        case .lineDiscount(let lineIndex, let percent, let reason):
+            guard lines.indices.contains(lineIndex) else { return }
+            lines[lineIndex].discountPercentText = percent == 0 ? "" : String(format: "%.2f", percent)
+            lines[lineIndex].discountReason = percent == 0 ? "" : reason
+            discountErrorMessage = nil
+            discountSelection = nil
+        case .addLine(let line):
+            let trimmedQuantity = line.quantityText.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard let quantity = Int(trimmedQuantity) else { return }
+            for _ in 0..<quantity {
+                lines.append(line.singleQuantityCopy())
+            }
+            selectedItemId = nil
+            selectedVariantId = nil
+            designPlacementText = ""
+            draftLine = CustomOrderDraftLine(item: PlaceholderCustomOrderItem.item)
+            errorMessage = nil
+        }
+    }
+
+    private func requestOverrideApproval() async {
+        let trimmedIdentifier = overrideApproverIdentifier.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedPassword = overrideApproverPassword.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedReason = overrideReason.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedReason.isEmpty else {
+            overrideErrorMessage = "Override reason is required."
+            return
+        }
+
+        guard let requiredPermission = requiredPermissionForPendingOverride else {
+            overrideErrorMessage = "No override action pending."
+            return
+        }
+
+        isApprovingOverride = true
+        defer { isApprovingOverride = false }
+
+        do {
+            _ = try await overrideApprovalService.validateApprover(
+                identifier: trimmedIdentifier,
+                password: trimmedPassword,
+                requiredPermission: requiredPermission
+            )
+            applyPendingOverrideAction()
+            pendingOverrideAction = nil
+            overrideErrorMessage = nil
+        } catch {
+            overrideErrorMessage = error.localizedDescription
+        }
+    }
+
+    private var overrideSheet: some View {
+        NavigationStack {
+            Form {
+                if let overrideErrorMessage {
+                    Section {
+                        Text(overrideErrorMessage)
+                            .foregroundStyle(.red)
+                    }
+                }
+
+                Section("Override Required") {
+                    Text("This custom-order change needs manager approval.")
+                        .font(.subheadline)
+                    TextField("Approver username/email/badge", text: $overrideApproverIdentifier)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled(true)
+                    SecureField("Approver password", text: $overrideApproverPassword)
+                    TextField("Override reason", text: $overrideReason, axis: .vertical)
+                }
+            }
+            .navigationTitle("Approval")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") {
+                        pendingOverrideAction = nil
+                    }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button {
+                        Task { await requestOverrideApproval() }
+                    } label: {
+                        if isApprovingOverride {
+                            ProgressView()
+                        } else {
+                            Text("Approve")
+                        }
+                    }
+                    .disabled(isApprovingOverride)
+                }
+            }
+        }
+    }
+
     private func save() async {
         guard let user = sessionManager.currentUser else { return }
         isSaving = true
         errorMessage = nil
         createdOrderMessage = nil
+        createdSlipPayload = nil
         defer { isSaving = false }
 
         do {
@@ -1276,6 +1452,13 @@ private struct CustomOrderEntryView: View {
                 device: sessionManager.currentDevice
             )
             createdOrderMessage = "Created custom order #\(result.orderId)."
+            if preferences.customOrderSlipEnabled {
+                let slipPayload = try await makeSlipPayload(orderId: result.orderId, user: user)
+                createdSlipPayload = slipPayload
+                if preferences.customOrderSlipAutoPrint {
+                    CustomOrderSlipPrintingService.printSlip(payload: slipPayload, preferences: preferences, format: .letter)
+                }
+            }
             lines = []
             paymentAmountText = ""
             paymentReference = ""
@@ -1284,6 +1467,23 @@ private struct CustomOrderEntryView: View {
         } catch {
             errorMessage = error.localizedDescription
         }
+    }
+
+    private func makeSlipPayload(orderId: Int64, user: AppUser) async throws -> CustomOrderSlipPayload {
+        let order = try await service.fetchOrder(orderId: orderId)
+        let account = try? await service.fetchCustomerAccount(customerId: order.customerId)
+        return CustomOrderSlipPayload(
+            order: order,
+            customerAccountNumber: account?.accountNumber,
+            storeName: order.locationName ?? sessionManager.selectedStore?.name ?? "Store",
+            deviceName: order.deviceName ?? sessionManager.currentDevice?.deviceName ?? sessionManager.currentDevice?.modelName ?? "UNKNOWN-DEVICE",
+            cashierName: order.takenByName ?? user.fullName
+        )
+    }
+
+    private func printCreatedSlip(format: CustomOrderSlipPrintFormat) async {
+        guard let createdSlipPayload else { return }
+        CustomOrderSlipPrintingService.printSlip(payload: createdSlipPayload, preferences: preferences, format: format)
     }
 }
 
@@ -1532,7 +1732,28 @@ private struct CustomOrderDetailView: View {
             }
             .navigationTitle(order.displayNumber)
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar { Button("Done") { dismiss() } }
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Done") { dismiss() }
+                }
+                ToolbarItem(placement: .primaryAction) {
+                    Menu {
+                        Button {
+                            Task { await printSlip(format: .letter) }
+                        } label: {
+                            Label("Print Letter Slip", systemImage: "doc.text")
+                        }
+                        Button {
+                            Task { await printSlip(format: .fortyColumn) }
+                        } label: {
+                            Label("Print 40-Col Slip", systemImage: "printer")
+                        }
+                    } label: {
+                        Label("Print Slip", systemImage: "printer")
+                    }
+                    .disabled(actionInProgress)
+                }
+            }
             .dismissKeyboardOnTap()
             .scrollDismissesKeyboard(.interactively)
             .task {
@@ -1601,6 +1822,31 @@ private struct CustomOrderDetailView: View {
 
     private func numberText(_ value: Double) -> String {
         value.rounded() == value ? String(Int(value)) : String(format: "%.2f", value)
+    }
+
+    private func printSlip(format: CustomOrderSlipPrintFormat) async {
+        actionInProgress = true
+        errorMessage = nil
+        defer { actionInProgress = false }
+
+        do {
+            let preferences = try await service.fetchCompanyPreferences(locationId: sessionManager.selectedStore?.id ?? order.locationId)
+            guard preferences.customOrderSlipEnabled else {
+                errorMessage = "Custom order slips are disabled in Company Preferences."
+                return
+            }
+            let account = try? await service.fetchCustomerAccount(customerId: order.customerId)
+            let payload = CustomOrderSlipPayload(
+                order: order,
+                customerAccountNumber: account?.accountNumber,
+                storeName: order.locationName ?? sessionManager.selectedStore?.name ?? "Store",
+                deviceName: order.deviceName ?? sessionManager.currentDevice?.deviceName ?? sessionManager.currentDevice?.modelName ?? "UNKNOWN-DEVICE",
+                cashierName: order.takenByName ?? sessionManager.currentUser?.fullName ?? "Cashier"
+            )
+            CustomOrderSlipPrintingService.printSlip(payload: payload, preferences: preferences, format: format)
+        } catch {
+            errorMessage = error.localizedDescription
+        }
     }
 
     private var canManage: Bool { sessionManager.currentUser?.canAccess(.manageCustomOrders) == true }
@@ -2122,19 +2368,24 @@ private enum CustomOrderManagerStatusFilter: Hashable {
 private struct CustomOrderEndOfDayView: View {
     @EnvironmentObject private var sessionManager: SessionManager
     private let service = CustomOrderService()
+    @State private var orderSales: [CustomOrderEndOfDaySale] = []
     @State private var payments: [CustomOrderPayment] = []
     @State private var returns: [CustomOrderEndOfDayReturn] = []
     @State private var filterCurrentDevice = true
     @State private var filterCurrentUser = false
+    @State private var selectedDate = Date()
     @State private var errorMessage: String?
+    @State private var drawers: [CashDrawer] = []
+    @State private var selectedDrawerId: Int64?
+    @State private var currentDrawer: ResolvedCashDrawer?
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 HStack(spacing: 12) {
+                    endOfDayTile("Total Sales", String(format: "$%.2f", orderSalesTotal), "list.clipboard.fill", .blue)
                     endOfDayTile("Payments", String(format: "$%.2f", paymentTotal), "creditcard.fill", .green)
                     endOfDayTile("Refunds", String(format: "$%.2f", refundTotal), "arrow.uturn.backward.circle.fill", .red)
-                    endOfDayTile("Payout", String(format: "$%.2f", payoutTotal), "banknote.fill", .orange)
                 }
 
                 if let errorMessage {
@@ -2151,15 +2402,37 @@ private struct CustomOrderEndOfDayView: View {
                     VStack(alignment: .leading, spacing: 12) {
                         Text("Filters")
                             .font(.headline)
+                        DatePicker("Business Day", selection: $selectedDate, displayedComponents: .date)
+                        dayPickerControls
                         Toggle("Current device only", isOn: $filterCurrentDevice)
                         Toggle("Current user only", isOn: $filterCurrentUser)
                         if let storeName = sessionManager.selectedStore?.name {
                             LabeledContent("Location", value: storeName)
                         }
+                        LabeledContent("Current Drawer", value: currentDrawer?.drawerName ?? "No drawer assigned")
+                        Picker("Drawer Filter", selection: $selectedDrawerId) {
+                            Text("All Drawers").tag(nil as Int64?)
+                            ForEach(drawers.filter(\.isActive)) { drawer in
+                                Text(drawer.displayName).tag(Optional(drawer.drawerId))
+                            }
+                        }
                     }
                 }
                 .onChange(of: filterCurrentDevice) { _, _ in Task { await load() } }
                 .onChange(of: filterCurrentUser) { _, _ in Task { await load() } }
+                .onChange(of: selectedDate) { _, _ in Task { await load() } }
+                .onChange(of: selectedDrawerId) { _, _ in Task { await load() } }
+
+                CustomOrderCard {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("Sales")
+                            .font(.headline)
+                        LabeledContent("Total Sales", value: String(format: "$%.2f", orderSalesTotal))
+                        LabeledContent("Collected", value: String(format: "$%.2f", orderSalesCollected))
+                        LabeledContent("Uncollected", value: String(format: "$%.2f", orderSalesUncollected))
+                        LabeledContent("Orders", value: "\(orderSales.count)")
+                    }
+                }
 
                 CustomOrderCard {
                     VStack(alignment: .leading, spacing: 10) {
@@ -2223,12 +2496,27 @@ private struct CustomOrderEndOfDayView: View {
             .padding()
         }
         .navigationTitle("Orders End Of Day")
-        .task { await load() }
+        .task {
+            await loadDrawerContext()
+            await load()
+        }
         .refreshable { await load() }
     }
 
     private var paymentTransactions: [CustomOrderPayment] {
         payments.filter { !$0.isRefundAction }
+    }
+
+    private var orderSalesTotal: Double {
+        orderSales.reduce(0) { $0 + $1.totalAmount }
+    }
+
+    private var orderSalesCollected: Double {
+        orderSales.reduce(0) { $0 + $1.amountPaid }
+    }
+
+    private var orderSalesUncollected: Double {
+        orderSales.reduce(0) { $0 + $1.balanceDue }
     }
 
     private var paymentTotal: Double {
@@ -2271,6 +2559,40 @@ private struct CustomOrderEndOfDayView: View {
         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
 
+    private var dayPickerControls: some View {
+        HStack {
+            Button {
+                moveSelectedDate(by: -1)
+            } label: {
+                Label("Previous Day", systemImage: "chevron.left")
+            }
+            .labelStyle(.iconOnly)
+
+            Spacer()
+
+            Button("Yesterday") {
+                selectedDate = Calendar.current.date(byAdding: .day, value: -1, to: Calendar.current.startOfDay(for: Date())) ?? Date()
+            }
+
+            Button("Today") {
+                selectedDate = Date()
+            }
+
+            Spacer()
+
+            Button {
+                moveSelectedDate(by: 1)
+            } label: {
+                Label("Next Day", systemImage: "chevron.right")
+            }
+            .labelStyle(.iconOnly)
+        }
+    }
+
+    private func moveSelectedDate(by days: Int) {
+        selectedDate = Calendar.current.date(byAdding: .day, value: days, to: selectedDate) ?? selectedDate
+    }
+
     private func eodPaymentRow(_ payment: CustomOrderPayment) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
@@ -2285,6 +2607,9 @@ private struct CustomOrderEndOfDayView: View {
                     .foregroundStyle(.secondary)
             }
             Text([payment.takenByName, payment.createdAt, payment.deviceName].compactMap { $0 }.joined(separator: " | "))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Text("Drawer: \(payment.cashDrawerName?.isEmpty == false ? payment.cashDrawerName! : "No drawer")")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
@@ -2307,28 +2632,66 @@ private struct CustomOrderEndOfDayView: View {
             Text([itemReturn.createdByName, itemReturn.createdAt, itemReturn.deviceName].compactMap { $0 }.joined(separator: " | "))
                 .font(.caption)
                 .foregroundStyle(.secondary)
+            Text("Drawer: \(itemReturn.cashDrawerName?.isEmpty == false ? itemReturn.cashDrawerName! : "No drawer")")
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
     }
 
     private func load() async {
         errorMessage = nil
         do {
+            async let loadedOrderSales = service.fetchEndOfDaySales(
+                locationId: sessionManager.selectedStore?.id,
+                deviceId: filterCurrentDevice ? sessionManager.currentDevice?.id.uuidString : nil,
+                userId: filterCurrentUser ? sessionManager.currentUser?.id : nil,
+                cashDrawerId: selectedDrawerId,
+                date: selectedDate
+            )
             async let loadedPayments = service.fetchEndOfDay(
                 locationId: sessionManager.selectedStore?.id,
                 deviceId: filterCurrentDevice ? sessionManager.currentDevice?.id.uuidString : nil,
-                userId: filterCurrentUser ? sessionManager.currentUser?.id : nil
+                userId: filterCurrentUser ? sessionManager.currentUser?.id : nil,
+                cashDrawerId: selectedDrawerId,
+                date: selectedDate
             )
             async let loadedReturns = service.fetchEndOfDayReturns(
                 locationId: sessionManager.selectedStore?.id,
                 deviceId: filterCurrentDevice ? sessionManager.currentDevice?.id.uuidString : nil,
-                userId: filterCurrentUser ? sessionManager.currentUser?.id : nil
+                userId: filterCurrentUser ? sessionManager.currentUser?.id : nil,
+                cashDrawerId: selectedDrawerId,
+                date: selectedDate
             )
+            orderSales = try await loadedOrderSales
             payments = try await loadedPayments
             returns = try await loadedReturns
         } catch {
             errorMessage = error.localizedDescription
+            orderSales = []
             payments = []
             returns = []
+        }
+    }
+
+    private func loadDrawerContext() async {
+        guard let store = sessionManager.selectedStore else {
+            drawers = []
+            currentDrawer = nil
+            selectedDrawerId = nil
+            return
+        }
+
+        do {
+            async let loadedDrawers = CashDrawerService().fetchDrawers(storeId: store.id, includeInactive: false)
+            async let loadedCurrent = try? CashDrawerService().resolveAssignedDrawer(storeId: store.id, deviceId: sessionManager.currentDevice?.id)
+            drawers = try await loadedDrawers
+            currentDrawer = await loadedCurrent
+            if let selectedDrawerId, !drawers.contains(where: { $0.drawerId == selectedDrawerId }) {
+                self.selectedDrawerId = nil
+            }
+        } catch {
+            drawers = []
+            currentDrawer = nil
         }
     }
 }

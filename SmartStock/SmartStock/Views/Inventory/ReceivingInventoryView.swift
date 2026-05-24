@@ -242,6 +242,11 @@ struct ReceivingInventoryView: View {
                 return
             }
 
+            if case .customItem(let customItem) = lookupItem, customItem.hasVariants {
+                errorMessage = "Select a specific custom variant for \(customItem.itemName)."
+                return
+            }
+
             let newItem = ReceivingCartItem(lookupItem: lookupItem, barcode: trimmedBarcode, quantity: quantityValue)
 
             if let index = shipmentItems.firstIndex(where: { $0.lookupKey == newItem.lookupKey }) {
@@ -286,6 +291,8 @@ struct ReceivingInventoryView: View {
                     guard let customItemId = $0.customItemId else { return nil }
                     return ReceiveCustomOrderItem(
                         customItemId: customItemId,
+                        customVariantId: $0.customVariantId,
+                        variantName: $0.variantName,
                         itemName: $0.itemName,
                         quantity: $0.quantity
                     )
@@ -350,6 +357,8 @@ private struct ReceivingCartItem: Identifiable {
     let id = UUID()
     let productId: Int?
     let customItemId: Int64?
+    let customVariantId: Int64?
+    let variantName: String?
     let itemName: String
     let barcode: String
     var quantity: Int
@@ -359,11 +368,21 @@ private struct ReceivingCartItem: Identifiable {
         case .product(let product):
             productId = product.id
             customItemId = nil
-            itemName = product.name
+            customVariantId = nil
+            variantName = nil
+            itemName = product.displayName
         case .customItem(let customItem):
             productId = nil
             customItemId = customItem.customItemId
+            customVariantId = nil
+            variantName = nil
             itemName = customItem.itemName
+        case .customVariant(let customItem, let variant):
+            productId = nil
+            customItemId = customItem.customItemId
+            customVariantId = variant.variantId
+            variantName = variant.variantName
+            itemName = "\(customItem.itemName) - \(variant.variantName)"
         }
         self.barcode = barcode
         self.quantity = quantity
@@ -373,9 +392,17 @@ private struct ReceivingCartItem: Identifiable {
         if let productId {
             return "product-\(productId)"
         }
+        if let customVariantId {
+            return "custom-variant-\(customVariantId)"
+        }
         return "custom-\(customItemId ?? 0)"
     }
 
     var isCustomItem: Bool { customItemId != nil }
-    var kindTitle: String { isCustomItem ? "Custom Item" : "Product" }
+    var kindTitle: String {
+        if customVariantId != nil {
+            return "Custom Variant"
+        }
+        return isCustomItem ? "Custom Item" : "Product"
+    }
 }

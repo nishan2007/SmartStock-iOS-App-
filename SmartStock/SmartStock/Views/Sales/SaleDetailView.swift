@@ -9,10 +9,12 @@ import SwiftUI
 import Supabase
 
 struct SaleDetailView: View {
+    @EnvironmentObject private var sessionManager: SessionManager
     let sale: Sale
 
     @State private var items: [SaleItem] = []
     @State private var isLoading = true
+    @State private var isPrinting = false
     @State private var errorMessage: String?
 
     var body: some View {
@@ -73,6 +75,25 @@ struct SaleDetailView: View {
         }
         .navigationTitle("Sale Details")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Menu {
+                    Button {
+                        Task { await printReceipt(format: .letter) }
+                    } label: {
+                        Label("Print Letter", systemImage: "doc.text")
+                    }
+                    Button {
+                        Task { await printReceipt(format: .fortyColumn) }
+                    } label: {
+                        Label("Print 40-Col", systemImage: "printer")
+                    }
+                } label: {
+                    Label("Print", systemImage: "printer")
+                }
+                .disabled(isLoading || isPrinting || items.isEmpty)
+            }
+        }
         .task {
             await loadSaleItems()
         }
@@ -187,7 +208,7 @@ struct SaleDetailView: View {
         do {
             items = try await supabase
                 .from("sale_items")
-                .select("sale_item_id, quantity, unit_price, products(name)")
+                .select("sale_item_id, quantity, unit_price, products(name, size, sku)")
                 .eq("sale_id", value: sale.sale_id)
                 .order("sale_item_id", ascending: true)
                 .execute()
@@ -195,6 +216,45 @@ struct SaleDetailView: View {
         } catch {
             errorMessage = error.localizedDescription
             print("LOAD SALE ITEMS ERROR:", error)
+        }
+    }
+
+    private func printReceipt(format: ReceiptPrintFormat) async {
+        isPrinting = true
+        errorMessage = nil
+        defer { isPrinting = false }
+
+        do {
+            let preferences = try await CustomOrderService().fetchCompanyPreferences(locationId: sessionManager.selectedStore?.id)
+            let payload = ReceiptPrintPayload(
+                saleId: sale.sale_id,
+                receiptNumber: sale.receiptNumberText,
+                date: extractCreatedAtDate() ?? Date(),
+                cashierName: sale.cashierName,
+                deviceId: sale.receipt_device_id ?? "",
+                customerName: sale.customerAccountName,
+                storeName: sale.storeName,
+                paymentMethod: sale.payment_method ?? "UNKNOWN",
+                paymentStatus: sale.payment_status ?? "UNKNOWN",
+                amountPaid: sale.amount_paid ?? sale.total_amount ?? 0,
+                cashCollected: nil,
+                changeDue: nil,
+                subtotal: sale.subtotal_amount ?? items.reduce(0) { $0 + $1.lineTotal },
+                discountAmount: sale.discount_amount ?? 0,
+                total: sale.total_amount ?? 0,
+                items: items.map {
+                    ReceiptPrintLineItem(
+                        name: $0.productName,
+                        sku: $0.productSku,
+                        quantity: $0.quantity,
+                        unitPrice: $0.unit_price ?? 0,
+                        discountAmount: 0
+                    )
+                }
+            )
+            ReceiptPrintingService.printReceipt(payload: payload, preferences: preferences, format: format)
+        } catch {
+            errorMessage = error.localizedDescription
         }
     }
 }

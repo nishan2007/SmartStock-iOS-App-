@@ -97,7 +97,7 @@ struct ReceivingHistoryView: View {
         do {
             rows = try await supabase
                 .from("inventory_movements")
-                .select("movement_id, change_qty, reason, note, created_at, receive_id, user_name, products(name), locations(name)")
+                .select("movement_id, change_qty, reason, note, created_at, receive_id, user_name, products(name, size), locations(name)")
                 .in("reason", values: ["receive", "INVENTORY_ENTRY"])
                 .eq("location_id", value: selectedStore.id)
                 .order("created_at", ascending: false)

@@ -480,7 +480,7 @@ struct StoreTransferView: View {
                 transferItems.append(
                     TransferCartItem(
                         productId: product.id,
-                        productName: product.name,
+                        productName: product.displayName,
                         barcode: trimmedBarcode,
                         quantity: 1
                     )

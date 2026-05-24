@@ -324,6 +324,10 @@ struct RecordCustomerPaymentParams: Encodable {
     let target_note: String
     let target_user_name: String
     let target_location_id: Int
+    let target_payment_method: String
+    let target_payment_reference: String?
+    let target_cash_drawer_id: Int64?
+    let target_cash_drawer_name: String?
 }
 
 struct NewCustomerAccountTransaction: Encodable {
@@ -332,6 +336,10 @@ struct NewCustomerAccountTransaction: Encodable {
     let sale_id: Int?
     let amount: Double
     let transaction_type: String
+    let payment_method: String?
+    let payment_reference: String?
+    let cash_drawer_id: Int64?
+    let cash_drawer_name: String?
     let note: String?
     let user_name: String
     let device_id: String?
@@ -339,12 +347,46 @@ struct NewCustomerAccountTransaction: Encodable {
 }
 
 enum CustomerAccountService {
+    static func fetchCustomers() async throws -> [CustomerAccount] {
+        try await supabase
+            .from("customer_accounts")
+            .select("customer_id, account_number, name, phone, email, credit_limit, current_balance, is_active, is_business, account_notes, customer_type_id, created_at")
+            .order("name", ascending: true)
+            .execute()
+            .value
+    }
+
+    static func createCustomer(_ customer: NewCustomerAccount) async throws {
+        _ = try await supabase
+            .from("customer_accounts")
+            .insert(customer)
+            .execute()
+    }
+
     static func fetchCustomer(_ customerId: Int) async throws -> CustomerAccount {
         try await supabase
             .from("customer_accounts")
             .select("customer_id, account_number, name, phone, email, credit_limit, current_balance, is_active, is_business, account_notes, customer_type_id, created_at")
             .eq("customer_id", value: customerId)
             .single()
+            .execute()
+            .value
+    }
+
+    static func updateCustomer(customerId: Int, payload: CustomerAccountUpdatePayload) async throws {
+        _ = try await supabase
+            .from("customer_accounts")
+            .update(payload)
+            .eq("customer_id", value: customerId)
+            .execute()
+    }
+
+    static func fetchSales(customerId: Int) async throws -> [Sale] {
+        try await supabase
+            .from("sales")
+            .select("sale_id, total_amount, status, transaction_source, created_at, payment_status, returned_amount, receipt_number, receipt_device_id, receipt_sequence, users(full_name), locations(name), customer_accounts(name)")
+            .eq("customer_id", value: customerId)
+            .order("sale_id", ascending: false)
             .execute()
             .value
     }
@@ -486,7 +528,10 @@ enum CustomerAccountService {
         amount: Double,
         note: String?,
         userName: String,
-        locationId: Int
+        locationId: Int,
+        paymentMethod: CustomOrderPaymentMethod,
+        paymentReference: String?,
+        cashDrawer: ResolvedCashDrawer?
     ) async throws -> RecordCustomerPaymentResult {
         let rows: [RecordCustomerPaymentResult] = try await supabase
             .rpc(
@@ -496,7 +541,11 @@ enum CustomerAccountService {
                     target_amount: amount,
                     target_note: normalizedValue(note),
                     target_user_name: userName,
-                    target_location_id: locationId
+                    target_location_id: locationId,
+                    target_payment_method: paymentMethod.rawValue,
+                    target_payment_reference: normalizedValue(paymentReference).isEmpty ? nil : normalizedValue(paymentReference),
+                    target_cash_drawer_id: cashDrawer?.drawerId,
+                    target_cash_drawer_name: cashDrawer?.drawerName
                 )
             )
             .execute()

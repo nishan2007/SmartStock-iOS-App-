@@ -461,6 +461,8 @@ struct CustomOrderPayment: Decodable, Identifiable {
     let paymentMethod: CustomOrderPaymentMethod
     let amount: Double
     let paymentReference: String?
+    let cashDrawerId: Int64?
+    let cashDrawerName: String?
     let paymentAction: String?
     let createdAt: String?
     let takenByName: String?
@@ -477,6 +479,8 @@ struct CustomOrderPayment: Decodable, Identifiable {
         case paymentMethod = "payment_method"
         case amount = "payment_amount"
         case paymentReference = "payment_reference"
+        case cashDrawerId = "cash_drawer_id"
+        case cashDrawerName = "cash_drawer_name"
         case paymentAction = "payment_action"
         case createdAt = "created_at"
         case takenByName = "taken_by_name"
@@ -495,6 +499,8 @@ struct CustomOrderEndOfDayReturn: Decodable, Identifiable {
     let balanceReduction: Double
     let payoutAmount: Double
     let reason: String
+    let cashDrawerId: Int64?
+    let cashDrawerName: String?
     let createdByName: String?
     let deviceId: String?
     let deviceName: String?
@@ -516,10 +522,55 @@ struct CustomOrderEndOfDayReturn: Decodable, Identifiable {
         case balanceReduction = "balance_reduction"
         case payoutAmount = "payout_amount"
         case reason
+        case cashDrawerId = "cash_drawer_id"
+        case cashDrawerName = "cash_drawer_name"
         case createdByName = "created_by_name"
         case deviceId = "device_id"
         case deviceName = "device_name"
         case createdAt = "created_at"
+    }
+}
+
+struct CustomOrderEndOfDaySale: Decodable, Identifiable {
+    let customOrderId: Int64
+    let orderNumber: String?
+    let totalAmount: Double
+    let amountPaid: Double
+    let balanceDue: Double
+    let paymentStatus: CustomOrderPaymentStatus
+    let cashDrawerId: Int64?
+    let cashDrawerName: String?
+    let createdAt: String?
+
+    var id: Int64 { customOrderId }
+    var displayNumber: String {
+        let trimmed = orderNumber?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return trimmed.isEmpty ? "Custom #\(customOrderId)" : trimmed
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case customOrderId = "custom_order_id"
+        case orderNumber = "order_number"
+        case totalAmount = "total_amount"
+        case amountPaid = "amount_paid"
+        case balanceDue = "balance_due"
+        case paymentStatus = "payment_status"
+        case cashDrawerId = "cash_drawer_id"
+        case cashDrawerName = "cash_drawer_name"
+        case createdAt = "created_at"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        customOrderId = try container.decodeCustomFlexibleInt64(forKey: .customOrderId)
+        orderNumber = try container.decodeCustomFlexibleStringIfPresent(forKey: .orderNumber)
+        totalAmount = try container.decodeCustomFlexibleDoubleIfPresent(forKey: .totalAmount) ?? 0
+        amountPaid = try container.decodeCustomFlexibleDoubleIfPresent(forKey: .amountPaid) ?? 0
+        balanceDue = try container.decodeCustomFlexibleDoubleIfPresent(forKey: .balanceDue) ?? 0
+        paymentStatus = CustomOrderPaymentStatus(rawValue: (try container.decodeIfPresent(String.self, forKey: .paymentStatus) ?? "UNPAID").uppercased()) ?? .unpaid
+        cashDrawerId = try container.decodeCustomFlexibleInt64IfPresent(forKey: .cashDrawerId)
+        cashDrawerName = try container.decodeCustomFlexibleStringIfPresent(forKey: .cashDrawerName)
+        createdAt = try container.decodeCustomFlexibleStringIfPresent(forKey: .createdAt)
     }
 }
 
@@ -701,13 +752,192 @@ struct CustomOrderLineProductionHistoryEntry: Decodable, Identifiable {
     }
 }
 
-struct CustomOrderCompanyPreferences: Decodable {
+struct CustomOrderCompanyPreferences: Codable {
+    var companyName: String
+    var receiptLogoURL: String
+    var receiptHeaderLine: String
+    var receiptFooterLine: String
+    var showReceiptLogo: Bool
+    var showSaleIdOnReceipt: Bool
+    var showDeviceIdOnReceipt: Bool
+    var showCustomerOnReceipt: Bool
+    var showSkuOnReceipt: Bool
+    var showItemDiscountsOnReceipt: Bool
+    var showPaymentStatusOnReceipt: Bool
+    var nextReceiptCounter: Int
+    var customOrderSlipEnabled: Bool
+    var customOrderSlipAutoPrint: Bool
+    var customOrderSlipTitle: String
+    var customOrderSlipContactLine: String
+    var customOrderSlipEmailLine: String
+    var customOrderSlipFooterNote: String
+    var customOrderSlipBlankDetailLines: Int
+    var customOrderSlipShowLogo: Bool
+    var customOrderSlipShowOrderNumber: Bool
+    var customOrderSlipShowDueDate: Bool
+    var customOrderSlipShowCustomerPhone: Bool
+    var customOrderSlipShowCustomerAccount: Bool
+    var customOrderSlipShowStore: Bool
+    var customOrderSlipShowDevice: Bool
+    var customOrderSlipShowCashier: Bool
+    var customOrderSlipShowLineItems: Bool
+    var customOrderSlipShowPricing: Bool
+    var customOrderSlipShowPaymentSummary: Bool
+    var customOrderSlipShowPaymentReference: Bool
+    var customOrderSlipShowTakenBy: Bool
+    var customOrderSlipShowSignatures: Bool
     var customOrderMinimumDepositPercent: Double
     var customOrderRefundApprovalLimit: Double
 
     enum CodingKeys: String, CodingKey {
+        case companyName = "company_name"
+        case receiptLogoURL = "receipt_logo_url"
+        case receiptHeaderLine = "receipt_header_line"
+        case receiptFooterLine = "receipt_footer_line"
+        case showReceiptLogo = "show_receipt_logo"
+        case showSaleIdOnReceipt = "show_sale_id_on_receipt"
+        case showDeviceIdOnReceipt = "show_device_id_on_receipt"
+        case showCustomerOnReceipt = "show_customer_on_receipt"
+        case showSkuOnReceipt = "show_sku_on_receipt"
+        case showItemDiscountsOnReceipt = "show_item_discounts_on_receipt"
+        case showPaymentStatusOnReceipt = "show_payment_status_on_receipt"
+        case nextReceiptCounter = "next_receipt_counter"
+        case customOrderSlipEnabled = "custom_order_slip_enabled"
+        case customOrderSlipAutoPrint = "custom_order_slip_auto_print"
+        case customOrderSlipTitle = "custom_order_slip_title"
+        case customOrderSlipContactLine = "custom_order_slip_contact_line"
+        case customOrderSlipEmailLine = "custom_order_slip_email_line"
+        case customOrderSlipFooterNote = "custom_order_slip_footer_note"
+        case customOrderSlipBlankDetailLines = "custom_order_slip_blank_detail_lines"
+        case customOrderSlipShowLogo = "custom_order_slip_show_logo"
+        case customOrderSlipShowOrderNumber = "custom_order_slip_show_order_number"
+        case customOrderSlipShowDueDate = "custom_order_slip_show_due_date"
+        case customOrderSlipShowCustomerPhone = "custom_order_slip_show_customer_phone"
+        case customOrderSlipShowCustomerAccount = "custom_order_slip_show_customer_account"
+        case customOrderSlipShowStore = "custom_order_slip_show_store"
+        case customOrderSlipShowDevice = "custom_order_slip_show_device"
+        case customOrderSlipShowCashier = "custom_order_slip_show_cashier"
+        case customOrderSlipShowLineItems = "custom_order_slip_show_line_items"
+        case customOrderSlipShowPricing = "custom_order_slip_show_pricing"
+        case customOrderSlipShowPaymentSummary = "custom_order_slip_show_payment_summary"
+        case customOrderSlipShowPaymentReference = "custom_order_slip_show_payment_reference"
+        case customOrderSlipShowTakenBy = "custom_order_slip_show_taken_by"
+        case customOrderSlipShowSignatures = "custom_order_slip_show_signatures"
         case customOrderMinimumDepositPercent = "custom_order_minimum_deposit_percent"
         case customOrderRefundApprovalLimit = "custom_order_refund_approval_limit"
+    }
+
+    init(
+        companyName: String = "SmartStock",
+        receiptLogoURL: String = "",
+        receiptHeaderLine: String = "",
+        receiptFooterLine: String = "Thank you",
+        showReceiptLogo: Bool = true,
+        showSaleIdOnReceipt: Bool = true,
+        showDeviceIdOnReceipt: Bool = true,
+        showCustomerOnReceipt: Bool = true,
+        showSkuOnReceipt: Bool = true,
+        showItemDiscountsOnReceipt: Bool = true,
+        showPaymentStatusOnReceipt: Bool = true,
+        nextReceiptCounter: Int = 1,
+        customOrderSlipEnabled: Bool = true,
+        customOrderSlipAutoPrint: Bool = false,
+        customOrderSlipTitle: String = "Customer's Order Slip",
+        customOrderSlipContactLine: String = "",
+        customOrderSlipEmailLine: String = "",
+        customOrderSlipFooterNote: String = "Please keep this slip for your records.",
+        customOrderSlipBlankDetailLines: Int = 4,
+        customOrderSlipShowLogo: Bool = true,
+        customOrderSlipShowOrderNumber: Bool = true,
+        customOrderSlipShowDueDate: Bool = true,
+        customOrderSlipShowCustomerPhone: Bool = true,
+        customOrderSlipShowCustomerAccount: Bool = true,
+        customOrderSlipShowStore: Bool = true,
+        customOrderSlipShowDevice: Bool = true,
+        customOrderSlipShowCashier: Bool = true,
+        customOrderSlipShowLineItems: Bool = true,
+        customOrderSlipShowPricing: Bool = true,
+        customOrderSlipShowPaymentSummary: Bool = true,
+        customOrderSlipShowPaymentReference: Bool = true,
+        customOrderSlipShowTakenBy: Bool = true,
+        customOrderSlipShowSignatures: Bool = true,
+        customOrderMinimumDepositPercent: Double,
+        customOrderRefundApprovalLimit: Double
+    ) {
+        self.companyName = companyName
+        self.receiptLogoURL = receiptLogoURL
+        self.receiptHeaderLine = receiptHeaderLine
+        self.receiptFooterLine = receiptFooterLine
+        self.showReceiptLogo = showReceiptLogo
+        self.showSaleIdOnReceipt = showSaleIdOnReceipt
+        self.showDeviceIdOnReceipt = showDeviceIdOnReceipt
+        self.showCustomerOnReceipt = showCustomerOnReceipt
+        self.showSkuOnReceipt = showSkuOnReceipt
+        self.showItemDiscountsOnReceipt = showItemDiscountsOnReceipt
+        self.showPaymentStatusOnReceipt = showPaymentStatusOnReceipt
+        self.nextReceiptCounter = max(nextReceiptCounter, 1)
+        self.customOrderSlipEnabled = customOrderSlipEnabled
+        self.customOrderSlipAutoPrint = customOrderSlipAutoPrint
+        self.customOrderSlipTitle = customOrderSlipTitle
+        self.customOrderSlipContactLine = customOrderSlipContactLine
+        self.customOrderSlipEmailLine = customOrderSlipEmailLine
+        self.customOrderSlipFooterNote = customOrderSlipFooterNote
+        self.customOrderSlipBlankDetailLines = customOrderSlipBlankDetailLines
+        self.customOrderSlipShowLogo = customOrderSlipShowLogo
+        self.customOrderSlipShowOrderNumber = customOrderSlipShowOrderNumber
+        self.customOrderSlipShowDueDate = customOrderSlipShowDueDate
+        self.customOrderSlipShowCustomerPhone = customOrderSlipShowCustomerPhone
+        self.customOrderSlipShowCustomerAccount = customOrderSlipShowCustomerAccount
+        self.customOrderSlipShowStore = customOrderSlipShowStore
+        self.customOrderSlipShowDevice = customOrderSlipShowDevice
+        self.customOrderSlipShowCashier = customOrderSlipShowCashier
+        self.customOrderSlipShowLineItems = customOrderSlipShowLineItems
+        self.customOrderSlipShowPricing = customOrderSlipShowPricing
+        self.customOrderSlipShowPaymentSummary = customOrderSlipShowPaymentSummary
+        self.customOrderSlipShowPaymentReference = customOrderSlipShowPaymentReference
+        self.customOrderSlipShowTakenBy = customOrderSlipShowTakenBy
+        self.customOrderSlipShowSignatures = customOrderSlipShowSignatures
+        self.customOrderMinimumDepositPercent = customOrderMinimumDepositPercent
+        self.customOrderRefundApprovalLimit = customOrderRefundApprovalLimit
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        companyName = try container.decodeIfPresent(String.self, forKey: .companyName) ?? "SmartStock"
+        receiptLogoURL = try container.decodeIfPresent(String.self, forKey: .receiptLogoURL) ?? ""
+        receiptHeaderLine = try container.decodeIfPresent(String.self, forKey: .receiptHeaderLine) ?? ""
+        receiptFooterLine = try container.decodeIfPresent(String.self, forKey: .receiptFooterLine) ?? "Thank you"
+        showReceiptLogo = try container.decodeIfPresent(Bool.self, forKey: .showReceiptLogo) ?? true
+        showSaleIdOnReceipt = try container.decodeIfPresent(Bool.self, forKey: .showSaleIdOnReceipt) ?? true
+        showDeviceIdOnReceipt = try container.decodeIfPresent(Bool.self, forKey: .showDeviceIdOnReceipt) ?? true
+        showCustomerOnReceipt = try container.decodeIfPresent(Bool.self, forKey: .showCustomerOnReceipt) ?? true
+        showSkuOnReceipt = try container.decodeIfPresent(Bool.self, forKey: .showSkuOnReceipt) ?? true
+        showItemDiscountsOnReceipt = try container.decodeIfPresent(Bool.self, forKey: .showItemDiscountsOnReceipt) ?? true
+        showPaymentStatusOnReceipt = try container.decodeIfPresent(Bool.self, forKey: .showPaymentStatusOnReceipt) ?? true
+        nextReceiptCounter = max(try container.decodeIfPresent(Int.self, forKey: .nextReceiptCounter) ?? 1, 1)
+        customOrderSlipEnabled = try container.decodeIfPresent(Bool.self, forKey: .customOrderSlipEnabled) ?? true
+        customOrderSlipAutoPrint = try container.decodeIfPresent(Bool.self, forKey: .customOrderSlipAutoPrint) ?? false
+        customOrderSlipTitle = try container.decodeIfPresent(String.self, forKey: .customOrderSlipTitle) ?? "Customer's Order Slip"
+        customOrderSlipContactLine = try container.decodeIfPresent(String.self, forKey: .customOrderSlipContactLine) ?? ""
+        customOrderSlipEmailLine = try container.decodeIfPresent(String.self, forKey: .customOrderSlipEmailLine) ?? ""
+        customOrderSlipFooterNote = try container.decodeIfPresent(String.self, forKey: .customOrderSlipFooterNote) ?? "Please keep this slip for your records."
+        customOrderSlipBlankDetailLines = try container.decodeIfPresent(Int.self, forKey: .customOrderSlipBlankDetailLines) ?? 4
+        customOrderSlipShowLogo = try container.decodeIfPresent(Bool.self, forKey: .customOrderSlipShowLogo) ?? true
+        customOrderSlipShowOrderNumber = try container.decodeIfPresent(Bool.self, forKey: .customOrderSlipShowOrderNumber) ?? true
+        customOrderSlipShowDueDate = try container.decodeIfPresent(Bool.self, forKey: .customOrderSlipShowDueDate) ?? true
+        customOrderSlipShowCustomerPhone = try container.decodeIfPresent(Bool.self, forKey: .customOrderSlipShowCustomerPhone) ?? true
+        customOrderSlipShowCustomerAccount = try container.decodeIfPresent(Bool.self, forKey: .customOrderSlipShowCustomerAccount) ?? true
+        customOrderSlipShowStore = try container.decodeIfPresent(Bool.self, forKey: .customOrderSlipShowStore) ?? true
+        customOrderSlipShowDevice = try container.decodeIfPresent(Bool.self, forKey: .customOrderSlipShowDevice) ?? true
+        customOrderSlipShowCashier = try container.decodeIfPresent(Bool.self, forKey: .customOrderSlipShowCashier) ?? true
+        customOrderSlipShowLineItems = try container.decodeIfPresent(Bool.self, forKey: .customOrderSlipShowLineItems) ?? true
+        customOrderSlipShowPricing = try container.decodeIfPresent(Bool.self, forKey: .customOrderSlipShowPricing) ?? true
+        customOrderSlipShowPaymentSummary = try container.decodeIfPresent(Bool.self, forKey: .customOrderSlipShowPaymentSummary) ?? true
+        customOrderSlipShowPaymentReference = try container.decodeIfPresent(Bool.self, forKey: .customOrderSlipShowPaymentReference) ?? true
+        customOrderSlipShowTakenBy = try container.decodeIfPresent(Bool.self, forKey: .customOrderSlipShowTakenBy) ?? true
+        customOrderSlipShowSignatures = try container.decodeIfPresent(Bool.self, forKey: .customOrderSlipShowSignatures) ?? true
+        customOrderMinimumDepositPercent = try container.decodeIfPresent(Double.self, forKey: .customOrderMinimumDepositPercent) ?? 0
+        customOrderRefundApprovalLimit = try container.decodeIfPresent(Double.self, forKey: .customOrderRefundApprovalLimit) ?? 0
     }
 }
 
@@ -720,6 +950,9 @@ struct CustomOrder: Decodable, Identifiable {
     let status: CustomOrderStatus
     let paymentStatus: CustomOrderPaymentStatus
     let paymentMethod: String?
+    let paymentReference: String?
+    let cashDrawerId: Int64?
+    let cashDrawerName: String?
     let dueDate: String?
     let orderNotes: String?
     let totalAmount: Double
@@ -761,6 +994,9 @@ struct CustomOrder: Decodable, Identifiable {
         case status
         case paymentStatus = "payment_status"
         case paymentMethod = "payment_method"
+        case paymentReference = "payment_reference"
+        case cashDrawerId = "cash_drawer_id"
+        case cashDrawerName = "cash_drawer_name"
         case dueDate = "due_date"
         case orderNotes = "order_notes"
         case totalAmount = "total_amount"
@@ -799,6 +1035,9 @@ struct CustomOrder: Decodable, Identifiable {
         status = CustomOrderStatus(rawValue: (try container.decodeIfPresent(String.self, forKey: .status) ?? "NEW").uppercased()) ?? .new
         paymentStatus = CustomOrderPaymentStatus(rawValue: (try container.decodeIfPresent(String.self, forKey: .paymentStatus) ?? "UNPAID").uppercased()) ?? .unpaid
         paymentMethod = try container.decodeCustomFlexibleStringIfPresent(forKey: .paymentMethod)
+        paymentReference = try container.decodeCustomFlexibleStringIfPresent(forKey: .paymentReference)
+        cashDrawerId = try container.decodeCustomFlexibleInt64IfPresent(forKey: .cashDrawerId)
+        cashDrawerName = try container.decodeCustomFlexibleStringIfPresent(forKey: .cashDrawerName)
         dueDate = try container.decodeCustomFlexibleStringIfPresent(forKey: .dueDate)
         orderNotes = try container.decodeCustomFlexibleStringIfPresent(forKey: .orderNotes)
         totalAmount = try container.decodeCustomFlexibleDoubleIfPresent(forKey: .totalAmount) ?? 0
@@ -990,6 +1229,7 @@ struct CustomOrderEmployee: Decodable, Identifiable, Hashable {
 
 struct CustomOrderItemDraft {
     var itemName = ""
+    var sku = ""
     var barcode = ""
     var description = ""
     var itemType: CustomOrderItemType = .inventory
@@ -1010,6 +1250,7 @@ struct CustomOrderItemDraft {
 
     init(item: CustomOrderItem) {
         itemName = item.itemName
+        sku = item.sku ?? ""
         barcode = item.barcode ?? ""
         description = item.description ?? ""
         itemType = item.itemType
@@ -1065,6 +1306,7 @@ struct CustomOrderItemDraft {
 struct CustomOrderVariantDraft {
     var parentItemName = ""
     var variantName = ""
+    var sku = ""
     var barcode = ""
     var fixedPrice = ""
     var quantityOnHand = "0"
@@ -1077,6 +1319,7 @@ struct CustomOrderVariantDraft {
     init(variant: CustomOrderItemVariant, parentItemName: String = "") {
         self.parentItemName = parentItemName
         variantName = variant.variantName
+        sku = variant.sku ?? ""
         barcode = variant.barcode ?? ""
         fixedPrice = variant.price.map { String(format: "%.2f", $0) } ?? ""
         quantityOnHand = Self.numberText(variant.quantityOnHand)

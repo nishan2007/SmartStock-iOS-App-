@@ -63,7 +63,7 @@ struct InventoryDetailView: View {
                         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
 
                     VStack(alignment: .leading, spacing: 6) {
-                        Text(displayedItem.name)
+                        Text(displayedItem.displayName)
                             .font(.headline)
                         Text(displayedItem.sku)
                             .font(.subheadline)
@@ -77,6 +77,7 @@ struct InventoryDetailView: View {
             Section("Product") {
                 detailRow(label: "Product ID", value: "\(displayedItem.productId)")
                 detailRow(label: "Name", value: displayedItem.name)
+                detailRow(label: "Size", value: displayedItem.sizeText)
                 detailRow(label: "SKU", value: displayedItem.sku)
                 detailRow(label: "Barcode", value: displayedItem.barcode ?? "—")
                 detailRow(label: "Type", value: displayedItem.productType.displayName)

@@ -13,7 +13,10 @@ struct CustomerPaymentView: View {
     let onPaymentRecorded: (Double) async -> Void
 
     @State private var displayedBalance: Double
+    @State private var paymentMethod: CustomOrderPaymentMethod = .cash
     @State private var paymentAmount = ""
+    @State private var paymentReference = ""
+    @State private var currentDrawer: ResolvedCashDrawer?
     @State private var note = ""
     @State private var outstandingItems: [CustomerOutstandingAccountItem] = []
     @State private var isLoading = true
@@ -85,6 +88,22 @@ struct CustomerPaymentView: View {
             Section("Record Payment") {
                 TextField("Payment amount", text: $paymentAmount)
                     .keyboardType(.decimalPad)
+
+                Picker("Payment Method", selection: $paymentMethod) {
+                    ForEach([CustomOrderPaymentMethod.cash, .card, .cheque, .mmg]) { method in
+                        Text(method.title).tag(method)
+                    }
+                }
+
+                if paymentMethod.requiresReference {
+                    TextField("Payment reference", text: $paymentReference)
+                        .textInputAutocapitalization(.characters)
+                        .autocorrectionDisabled(true)
+                }
+
+                if paymentMethod == .cash {
+                    LabeledContent("Cash Drawer", value: currentDrawer?.drawerName ?? "Not assigned")
+                }
 
                 TextField("Note (optional)", text: $note, axis: .vertical)
                     .lineLimit(2...4)
@@ -162,7 +181,9 @@ struct CustomerPaymentView: View {
         .task {
             paymentAmount = String(format: "%.2f", currentBalance)
             await loadOutstandingSales()
+            await loadCurrentDrawer()
         }
+        .onChange(of: paymentMethod) { _, _ in Task { await loadCurrentDrawer() } }
         .toolbar {
             ToolbarItem(placement: .cancellationAction) {
                 Button("Done") {
@@ -205,23 +226,40 @@ struct CustomerPaymentView: View {
             return
         }
 
+        if paymentMethod.requiresReference && paymentReference.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            errorMessage = "Enter the payment reference."
+            return
+        }
+
         isSaving = true
         errorMessage = nil
         successMessage = nil
         defer { isSaving = false }
 
         do {
+            let cashDrawer: ResolvedCashDrawer?
+            if paymentMethod == .cash {
+                cashDrawer = try await CashDrawerService().resolveAssignedDrawer(storeId: store.id, deviceId: sessionManager.currentDevice?.id)
+                currentDrawer = cashDrawer
+            } else {
+                cashDrawer = nil
+            }
+
             let result = try await CustomerAccountService.recordPayment(
                 customerId: customer.customerId,
                 amount: parsedPaymentAmount,
                 note: note,
                 userName: user.fullName,
-                locationId: store.id
+                locationId: store.id,
+                paymentMethod: paymentMethod,
+                paymentReference: paymentReference,
+                cashDrawer: cashDrawer
             )
 
             successMessage = "Payment recorded as \(result.paymentId)."
             displayedBalance = max(result.newBalance, 0)
             paymentAmount = String(format: "%.2f", displayedBalance)
+            paymentReference = ""
             note = ""
 
             await onPaymentRecorded(result.newBalance)
@@ -229,6 +267,16 @@ struct CustomerPaymentView: View {
         } catch {
             errorMessage = error.localizedDescription
         }
+    }
+
+    private func loadCurrentDrawer() async {
+        guard paymentMethod == .cash,
+              let store = sessionManager.selectedStore else {
+            currentDrawer = nil
+            return
+        }
+
+        currentDrawer = try? await CashDrawerService().resolveAssignedDrawer(storeId: store.id, deviceId: sessionManager.currentDevice?.id)
     }
 
     private func currency(_ value: Double) -> String {

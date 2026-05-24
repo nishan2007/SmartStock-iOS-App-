@@ -227,3 +227,25 @@ struct UpdateCustomerAccount: Encodable {
         case isBusiness = "is_business"
     }
 }
+
+struct CustomerAccountUpdatePayload: Encodable {
+    let name: String
+    let accountNumber: String?
+    let phone: String?
+    let email: String?
+    let accountNotes: String?
+    let creditLimit: Double
+    let isActive: Bool
+    let isBusiness: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case name
+        case accountNumber = "account_number"
+        case phone
+        case email
+        case accountNotes = "account_notes"
+        case creditLimit = "credit_limit"
+        case isActive = "is_active"
+        case isBusiness = "is_business"
+    }
+}

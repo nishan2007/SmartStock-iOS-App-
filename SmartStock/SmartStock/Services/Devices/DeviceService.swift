@@ -96,10 +96,7 @@ final class DeviceService {
     }
 
     func registerCurrentDevice(userId: Int?, storeId: Int?) async throws -> DeviceRegistrationResult {
-        let receiptDeviceName = await MainActor.run {
-            ReceiptNumberManager.shared.currentDeviceId()
-        }
-        let info = collectDeviceInfo(localUsername: receiptDeviceName)
+        let info = collectDeviceInfo(localUsername: nil)
 
         let device = try await registerCurrentDeviceWithRPC(info: info, userId: userId, storeId: storeId)
         try await endActiveDeviceSessions(deviceId: device.id, excludingSessionId: nil)
@@ -143,6 +140,17 @@ final class DeviceService {
         try await client
             .from("devices")
             .update(DeviceLocalUsernameUpdatePayload(localUsername: localUsername))
+            .eq("device_id", value: deviceId.uuidString)
+            .select(deviceSelectColumns)
+            .single()
+            .execute()
+            .value
+    }
+
+    func updateDeviceReceiptCode(deviceId: UUID, receiptDeviceCode: String) async throws -> TrackedDevice {
+        try await client
+            .from("devices")
+            .update(DeviceReceiptCodeUpdatePayload(receiptDeviceCode: receiptDeviceCode))
             .eq("device_id", value: deviceId.uuidString)
             .select(deviceSelectColumns)
             .single()
@@ -289,6 +297,7 @@ final class DeviceService {
         java_version,
         app_version,
         local_username,
+        receipt_device_code,
         mac_addresses,
         first_seen,
         last_seen,
@@ -514,6 +523,14 @@ private struct DeviceLocalUsernameUpdatePayload: Encodable {
 
     enum CodingKeys: String, CodingKey {
         case localUsername = "local_username"
+    }
+}
+
+private struct DeviceReceiptCodeUpdatePayload: Encodable {
+    let receipt_device_code: String
+
+    init(receiptDeviceCode: String) {
+        self.receipt_device_code = receiptDeviceCode
     }
 }
 

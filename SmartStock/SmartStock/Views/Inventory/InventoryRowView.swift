@@ -18,13 +18,18 @@ struct InventoryRowView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
 
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(item.name)
+                    Text(item.displayName)
                         .font(.headline)
                         .foregroundStyle(.primary)
 
-                    Text("SKU: \(item.sku)")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("SKU: \(item.sku)")
+                        if item.sizeText != "—" {
+                            Text("Size: \(item.sizeText)")
+                        }
+                    }
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
 
                     HStack(spacing: 8) {
                         Text("ID: \(item.productId)")

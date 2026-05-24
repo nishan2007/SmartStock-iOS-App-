@@ -66,13 +66,6 @@ struct AdminHubView: View {
 
     private var storeItems: [AdminHubItem] {
         [
-            canAccess(.locationManagement) ? AdminHubItem(
-                title: "Locations",
-                subtitle: "Store records",
-                systemImage: "map.fill",
-                tint: .red,
-                destination: AnyView(LocationManagementView().environmentObject(sessionManager))
-            ) : nil,
             canAccess(.departmentManagement) ? AdminHubItem(
                 title: "Departments",
                 subtitle: "Category management",
@@ -101,12 +94,16 @@ struct AdminHubView: View {
                 tint: .orange,
                 destination: AnyView(AdminPartsView().environmentObject(sessionManager))
             ) : nil,
-            canAccess(.companyPreferences) || canAccess(.customOrderDepositSettings) || canAccess(.customOrderRefundApprovalSettings) ? AdminHubItem(
+            canAccess(.companyPreferences)
+                || canAccess(.locationManagement)
+                || canAccess(.cashDrawerManagement)
+                || canAccess(.customOrderDepositSettings)
+                || canAccess(.customOrderRefundApprovalSettings) ? AdminHubItem(
                 title: "Company Preferences",
-                subtitle: "Custom order deposit and refund controls",
+                subtitle: "Identity, locations, drawers, receipts, and order controls",
                 systemImage: "slider.horizontal.3",
                 tint: .indigo,
-                destination: AnyView(CustomOrderPreferencesView().environmentObject(sessionManager))
+                destination: AnyView(CompanyPreferencesView().environmentObject(sessionManager))
             ) : nil
         ].compactMap { $0 }
     }

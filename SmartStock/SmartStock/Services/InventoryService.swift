@@ -53,6 +53,7 @@ struct InventoryService {
                     product:products!inner(
                         product_id,
                         name,
+                        size,
                         sku,
                         barcode,
                         cost_price,
@@ -89,6 +90,7 @@ struct InventoryService {
                     product:products!inner(
                         product_id,
                         name,
+                        size,
                         sku,
                         barcode,
                         cost_price,
@@ -129,6 +131,7 @@ struct InventoryService {
                 product:products!inner(
                     product_id,
                     name,
+                    size,
                     sku,
                     barcode,
                     cost_price,
@@ -169,6 +172,7 @@ struct InventoryService {
                 product:products!inner(
                     product_id,
                     name,
+                    size,
                     sku,
                     barcode,
                     cost_price,
@@ -214,7 +218,8 @@ private struct InventoryRowDTO: Decodable {
             id: "\(product_id)-\(location_id)",
             productId: product.product_id,
             name: product.name,
-            sku: product.sku,
+            size: product.size,
+            sku: product.sku ?? "",
             barcode: product.barcode,
             additionalBarcodes: product.product_barcodes.map(\.barcode),
             price: product.price,
@@ -251,7 +256,8 @@ private struct InventoryRowDTO: Decodable {
 private struct ProductDTO: Decodable {
     let product_id: Int
     let name: String
-    let sku: String
+    let size: String?
+    let sku: String?
     let barcode: String?
     let cost_price: Decimal?
     let price: Decimal

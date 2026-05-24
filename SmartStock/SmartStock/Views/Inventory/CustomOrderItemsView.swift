@@ -1276,7 +1276,7 @@ private struct CustomOrderItemFormView: View {
 
                 Section("Template") {
                     TextField("Item name", text: $draft.itemName)
-                    LabeledContent("Item SKU", value: generatedItemSku)
+                    LabeledContent("Item SKU", value: itemSkuDisplay)
                     Picker("Type", selection: $draft.itemType) {
                         ForEach(CustomOrderItemType.allCases) { type in
                             Text(type.title).tag(type)
@@ -1630,8 +1630,8 @@ private struct CustomOrderItemFormView: View {
         draft.pricingType == .fixed || draft.pricingType == .area
     }
 
-    private var generatedItemSku: String {
-        CustomOrderService.generatedSku(from: [draft.itemName])
+    private var itemSkuDisplay: String {
+        draft.sku.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Generated on save" : draft.sku
     }
 
     private var totalSoldQuantity: Double {
@@ -1659,8 +1659,9 @@ private struct CustomOrderItemFormView: View {
 
         do {
             let wasUnsaved = currentItemId == nil
-            let savedId = try await service.saveItem(draft, existingItemId: currentItemId)
-            currentItemId = savedId
+            let saved = try await service.saveItem(draft, existingItemId: currentItemId)
+            currentItemId = saved.custom_item_id
+            draft.sku = saved.sku ?? draft.sku
             await onSaved()
             if wasUnsaved && draft.hasVariants {
                 await loadDetailData()
@@ -1806,7 +1807,7 @@ private struct CustomOrderVariantFormView: View {
 
                 Section("Variant") {
                     TextField("Variant name", text: $draft.variantName)
-                    LabeledContent("SKU", value: generatedVariantSku)
+                    LabeledContent("SKU", value: variantSkuDisplay)
                     TextField("Barcode", text: $draft.barcode)
                         .textInputAutocapitalization(.characters)
                         .autocorrectionDisabled(true)
@@ -1857,7 +1858,9 @@ private struct CustomOrderVariantFormView: View {
         defer { isSaving = false }
 
         do {
-            try await service.saveVariant(draft, customItemId: itemId, existingVariantId: variant?.variantId, requiresPrice: requiresPrice)
+            if let saved = try await service.saveVariant(draft, customItemId: itemId, existingVariantId: variant?.variantId, requiresPrice: requiresPrice) {
+                draft.sku = saved.sku ?? draft.sku
+            }
             await onSaved()
             dismiss()
         } catch {
@@ -1865,8 +1868,8 @@ private struct CustomOrderVariantFormView: View {
         }
     }
 
-    private var generatedVariantSku: String {
-        CustomOrderService.generatedSku(from: [parentItemName, draft.variantName])
+    private var variantSkuDisplay: String {
+        draft.sku.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Generated on save" : draft.sku
     }
 
     @ViewBuilder

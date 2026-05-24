@@ -11,6 +11,11 @@ import Supabase
  
  
 struct MakeSaleView: View {
+    private enum CartOverrideAction {
+        case itemPrice(itemId: UUID, newPrice: Double)
+        case itemDiscount(itemId: UUID, newDiscount: Double)
+    }
+
     private enum SalePaymentMethod: String, CaseIterable, Identifiable {
         case cash = "CASH"
         case card = "CARD"
@@ -52,6 +57,7 @@ struct MakeSaleView: View {
     @State private var isCheckingOut = false
     @State private var checkoutMessage: String?
     @State private var checkoutError: String?
+    @State private var lastReceiptPayload: ReceiptPrintPayload?
     @State private var isShowingScanner = false
     @State private var scannedBarcode = ""
     @State private var scannerError: String?
@@ -59,8 +65,15 @@ struct MakeSaleView: View {
     @State private var editedUnitPriceText = ""
     @State private var editingDiscountItemID: UUID?
     @State private var editedItemDiscountText = ""
+    @State private var pendingOverrideAction: CartOverrideAction?
+    @State private var overrideApproverIdentifier = ""
+    @State private var overrideApproverPassword = ""
+    @State private var overrideReason = ""
+    @State private var overrideErrorMessage: String?
+    @State private var isApprovingOverride = false
     @FocusState private var isSearchFieldFocused: Bool
     @State private var searchTask: Task<Void, Never>?
+    private let overrideApprovalService = OverrideApprovalService()
  
     var body: some View {
         NavigationStack {
@@ -154,7 +167,7 @@ struct MakeSaleView: View {
                                                 .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
  
                                             VStack(alignment: .leading, spacing: 4) {
-                                                Text(product.name)
+                                                Text(product.displayName)
                                                     .font(.headline)
                                                     .foregroundColor(.primary)
                                                     .lineLimit(1)
@@ -246,7 +259,7 @@ struct MakeSaleView: View {
                                                         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                  
                                                     VStack(alignment: .leading, spacing: 4) {
-                                                        Text(item.product.name)
+                                                        Text(item.product.displayName)
                                                             .font(.headline)
                                                             .lineLimit(2)
                  
@@ -283,28 +296,31 @@ struct MakeSaleView: View {
                                                         }
                                                         .buttonStyle(.plain)
                                                     }
-                 
+
                                                     Text("$\(item.lineTotal, specifier: "%.2f")")
                                                         .font(.headline)
                                                         .frame(minWidth: 70, alignment: .trailing)
                                                 }
                                                 .padding(.vertical, 2)
                                                 .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
-                                                .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                                                    if canApplySaleDiscount {
-                                                        Button("Discount") {
-                                                            editingDiscountItemID = item.id
-                                                            editedItemDiscountText = String(format: "%.2f", item.discountAmount)
-                                                        }
-                                                        .tint(.orange)
+                                                .swipeActions(edge: .leading, allowsFullSwipe: false) {
+                                                    Button("Discount") {
+                                                        editingDiscountItemID = item.id
+                                                        editedItemDiscountText = String(format: "%.2f", item.discountAmount)
                                                     }
-                 
-                                                    if canChangeSaleItemPrice {
-                                                        Button("Price") {
-                                                            editingPriceItemID = item.id
-                                                            editedUnitPriceText = String(format: "%.2f", item.unitPrice)
-                                                        }
-                                                        .tint(.blue)
+                                                    .tint(.orange)
+ 
+                                                    Button("Price") {
+                                                        editingPriceItemID = item.id
+                                                        editedUnitPriceText = String(format: "%.2f", item.unitPrice)
+                                                    }
+                                                    .tint(.blue)
+                                                }
+                                                .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                                                    Button(role: .destructive) {
+                                                        removeCartItem(item)
+                                                    } label: {
+                                                        Text("Delete")
                                                     }
                                                 }
                                             }
@@ -345,10 +361,31 @@ struct MakeSaleView: View {
                                                 .font(.subheadline)
                                                 .multilineTextAlignment(.center)
                                         }
-                 
+
+                                        if lastReceiptPayload != nil {
+                                            HStack(spacing: 10) {
+                                                Button {
+                                                    Task { await printLastReceipt(format: .letter) }
+                                                } label: {
+                                                    Label("Letter", systemImage: "doc.text")
+                                                        .frame(maxWidth: .infinity)
+                                                }
+                                                .buttonStyle(.bordered)
+
+                                                Button {
+                                                    Task { await printLastReceipt(format: .fortyColumn) }
+                                                } label: {
+                                                    Label("40-Col", systemImage: "printer")
+                                                        .frame(maxWidth: .infinity)
+                                                }
+                                                .buttonStyle(.bordered)
+                                            }
+                                        }
+ 
                                         Button {
                                             checkoutError = nil
                                             checkoutMessage = nil
+                                            lastReceiptPayload = nil
                                             isShowingCheckoutSheet = true
                                         } label: {
                                             if isCheckingOut {
@@ -384,7 +421,8 @@ struct MakeSaleView: View {
                                     editingPriceItemID = nil
                                 }
                                 Button("Save") {
-                                    applyEditedPrice()
+                                    guard let itemID = editingPriceItemID else { return }
+                                    Task { await applyEditedPrice(for: itemID) }
                                 }
                             } message: {
                                 Text("Update the unit price for this cart item.")
@@ -396,7 +434,8 @@ struct MakeSaleView: View {
                                     editingDiscountItemID = nil
                                 }
                                 Button("Save") {
-                                    applyEditedItemDiscount()
+                                    guard let itemID = editingDiscountItemID else { return }
+                                    Task { await applyEditedItemDiscount(for: itemID) }
                                 }
                             } message: {
                                 Text("Apply a discount to this cart line.")
@@ -422,6 +461,9 @@ struct MakeSaleView: View {
                             .ignoresSafeArea(.keyboard, edges: .bottom)
                             .sheet(isPresented: $isShowingCheckoutSheet) {
                                 checkoutSheet
+                            }
+                            .sheet(isPresented: isShowingOverrideSheet) {
+                                overrideSheet
                             }
                             .onChange(of: paymentMethod) { _, newMethod in
                                 if newMethod == .cash {
@@ -498,6 +540,17 @@ struct MakeSaleView: View {
         }
     }
 
+    var isShowingOverrideSheet: Binding<Bool> {
+        Binding {
+            pendingOverrideAction != nil
+        } set: { isPresented in
+            if !isPresented {
+                pendingOverrideAction = nil
+                overrideErrorMessage = nil
+            }
+        }
+    }
+
     var isShowingSearchResults: Bool {
         !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !products.isEmpty
     }
@@ -505,6 +558,7 @@ struct MakeSaleView: View {
     func addToCart(_ product: Product) {
         checkoutError = nil
         checkoutMessage = nil
+        lastReceiptPayload = nil
         searchText = ""
         products = []
         scannedBarcode = ""
@@ -546,9 +600,17 @@ struct MakeSaleView: View {
         cart.remove(atOffsets: offsets)
     }
 
+    func removeCartItem(_ item: CartItem) {
+        checkoutError = nil
+        checkoutMessage = nil
+        guard let index = cart.firstIndex(where: { $0.id == item.id }) else { return }
+        cart.remove(at: index)
+    }
+
     func clearCart() {
         checkoutError = nil
         checkoutMessage = nil
+        lastReceiptPayload = nil
         scannerError = nil
         products = []
         cart.removeAll()
@@ -579,7 +641,7 @@ struct MakeSaleView: View {
             // 1️⃣ Try direct match in products table
             let directResults: [Product] = try await supabase
                 .from("products")
-                .select("product_id, name, sku, price, image_url")
+                .select("product_id, name, size, sku, price, image_url")
                 .or("barcode.eq.\(barcode),sku.eq.\(barcode)")
                 .limit(1)
                 .execute()
@@ -616,7 +678,7 @@ struct MakeSaleView: View {
             // 3️⃣ Fetch actual product using product_id
             let products: [Product] = try await supabase
                 .from("products")
-                .select("product_id, name, sku, price, image_url")
+                .select("product_id, name, size, sku, price, image_url")
                 .eq("product_id", value: match.product_id)
                 .limit(1)
                 .execute()
@@ -650,8 +712,8 @@ struct MakeSaleView: View {
         do {
             let results: [Product] = try await supabase
                 .from("products")
-                .select("product_id, name, sku, price, image_url")
-                .or("name.ilike.%\(trimmedSearch)%,sku.ilike.%\(trimmedSearch)%,barcode.ilike.%\(trimmedSearch)%")
+                .select("product_id, name, size, sku, price, image_url")
+                .or("name.ilike.%\(trimmedSearch)%,size.ilike.%\(trimmedSearch)%,sku.ilike.%\(trimmedSearch)%,barcode.ilike.%\(trimmedSearch)%")
                 .limit(4)
                 .execute()
                 .value
@@ -686,7 +748,7 @@ struct MakeSaleView: View {
 
             let matchedProducts: [Product] = try await supabase
                 .from("products")
-                .select("product_id, name, sku, price, image_url")
+                .select("product_id, name, size, sku, price, image_url")
                 .eq("product_id", value: match.product_id)
                 .limit(1)
                 .execute()
@@ -745,7 +807,7 @@ struct MakeSaleView: View {
         defer { isCheckingOut = false }
 
         do {
-            try await CheckoutService.checkout(
+            let receiptPayload = try await CheckoutService.checkout(
                 cart: cart,
                 user: user,
                 store: store,
@@ -754,6 +816,28 @@ struct MakeSaleView: View {
                 paymentReference: trimmedPaymentReference,
                 device: sessionManager.currentDevice
             )
+            if let receiptPayload {
+                lastReceiptPayload = ReceiptPrintPayload(
+                    saleId: receiptPayload.saleId,
+                    receiptNumber: receiptPayload.receiptNumber,
+                    date: receiptPayload.date,
+                    cashierName: receiptPayload.cashierName,
+                    deviceId: receiptPayload.deviceId,
+                    customerName: receiptPayload.customerName,
+                    storeName: receiptPayload.storeName,
+                    paymentMethod: receiptPayload.paymentMethod,
+                    paymentStatus: receiptPayload.paymentStatus,
+                    amountPaid: receiptPayload.amountPaid,
+                    cashCollected: paymentMethod == .cash ? cashCollectedAmount : nil,
+                    changeDue: paymentMethod == .cash ? changeDue : nil,
+                    subtotal: receiptPayload.subtotal,
+                    discountAmount: receiptPayload.discountAmount,
+                    total: receiptPayload.total,
+                    items: receiptPayload.items
+                )
+            } else {
+                lastReceiptPayload = nil
+            }
 
             cart.removeAll()
             products = []
@@ -773,52 +857,188 @@ struct MakeSaleView: View {
         }
     }
 
+    func printLastReceipt(format: ReceiptPrintFormat) async {
+        guard let lastReceiptPayload, let store = sessionManager.selectedStore else { return }
+
+        do {
+            let preferences = try await CustomOrderService().fetchCompanyPreferences(locationId: store.id)
+            ReceiptPrintingService.printReceipt(
+                payload: lastReceiptPayload,
+                preferences: preferences,
+                format: format
+            )
+        } catch {
+            checkoutError = error.localizedDescription
+        }
+    }
+
     func loadCustomerAccounts() async {
         do {
-            customerAccounts = try await supabase
-                .from("customer_accounts")
-                .select("customer_id, account_number, name, phone, email, credit_limit, current_balance, is_active, is_business, account_notes, customer_type_id, created_at")
-                .order("name", ascending: true)
-                .execute()
-                .value
+            customerAccounts = try await CustomerAccountService.fetchCustomers()
         } catch {
             print("LOAD SALE CUSTOMER ACCOUNTS ERROR:", error)
         }
     }
 
-    func applyEditedPrice() {
-        guard let editingPriceItemID,
-              let index = cart.firstIndex(where: { $0.id == editingPriceItemID }) else {
+    func applyEditedPrice(for itemID: UUID) async {
+        guard let index = cart.firstIndex(where: { $0.id == itemID }) else {
             self.editingPriceItemID = nil
             return
         }
 
-        guard let newPrice = Double(editedUnitPriceText.trimmingCharacters(in: .whitespacesAndNewlines)),
+        guard let newPrice = parsedMoneyValue(editedUnitPriceText),
               newPrice >= 0 else {
             checkoutError = "Enter a valid unit price."
             return
         }
 
+        if !canChangeSaleItemPrice {
+            pendingOverrideAction = .itemPrice(itemId: itemID, newPrice: newPrice)
+            overrideApproverIdentifier = ""
+            overrideApproverPassword = ""
+            overrideReason = ""
+            overrideErrorMessage = nil
+            self.editingPriceItemID = nil
+            return
+        }
+
         cart[index].unitPrice = newPrice
         cart[index].discountAmount = min(cart[index].discountAmount, cart[index].subtotal)
+        checkoutError = nil
         self.editingPriceItemID = nil
     }
 
-    func applyEditedItemDiscount() {
-        guard let editingDiscountItemID,
-              let index = cart.firstIndex(where: { $0.id == editingDiscountItemID }) else {
+    func applyEditedItemDiscount(for itemID: UUID) async {
+        guard let index = cart.firstIndex(where: { $0.id == itemID }) else {
             self.editingDiscountItemID = nil
             return
         }
 
-        guard let newDiscount = Double(editedItemDiscountText.trimmingCharacters(in: .whitespacesAndNewlines)),
+        guard let newDiscount = parsedMoneyValue(editedItemDiscountText),
               newDiscount >= 0 else {
             checkoutError = "Enter a valid item discount."
             return
         }
 
+        if !canApplySaleDiscount {
+            pendingOverrideAction = .itemDiscount(itemId: itemID, newDiscount: newDiscount)
+            overrideApproverIdentifier = ""
+            overrideApproverPassword = ""
+            overrideReason = ""
+            overrideErrorMessage = nil
+            self.editingDiscountItemID = nil
+            return
+        }
+
         cart[index].discountAmount = min(newDiscount, cart[index].subtotal)
+        checkoutError = nil
         self.editingDiscountItemID = nil
+    }
+
+    private func parsedMoneyValue(_ input: String) -> Double? {
+        let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        let normalized = trimmed.replacingOccurrences(of: ",", with: "").replacingOccurrences(of: "$", with: "")
+        return Double(normalized)
+    }
+
+    private func applyPendingOverrideAction() {
+        guard let pendingOverrideAction else { return }
+        switch pendingOverrideAction {
+        case .itemPrice(let itemId, let newPrice):
+            guard let index = cart.firstIndex(where: { $0.id == itemId }) else { return }
+            cart[index].unitPrice = newPrice
+            cart[index].discountAmount = min(cart[index].discountAmount, cart[index].subtotal)
+        case .itemDiscount(let itemId, let newDiscount):
+            guard let index = cart.firstIndex(where: { $0.id == itemId }) else { return }
+            cart[index].discountAmount = min(newDiscount, cart[index].subtotal)
+        }
+    }
+
+    private func requestOverrideApproval() async {
+        let trimmedIdentifier = overrideApproverIdentifier.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedPassword = overrideApproverPassword.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedReason = overrideReason.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedReason.isEmpty else {
+            overrideErrorMessage = "Override reason is required."
+            return
+        }
+
+        guard let requiredPermission = requiredPermissionForPendingAction else {
+            overrideErrorMessage = "No override action pending."
+            return
+        }
+
+        isApprovingOverride = true
+        defer { isApprovingOverride = false }
+
+        do {
+            _ = try await overrideApprovalService.validateApprover(
+                identifier: trimmedIdentifier,
+                password: trimmedPassword,
+                requiredPermission: requiredPermission
+            )
+            applyPendingOverrideAction()
+            pendingOverrideAction = nil
+            overrideErrorMessage = nil
+            checkoutError = nil
+        } catch {
+            overrideErrorMessage = error.localizedDescription
+        }
+    }
+
+    private var requiredPermissionForPendingAction: MobilePermission? {
+        guard let pendingOverrideAction else { return nil }
+        switch pendingOverrideAction {
+        case .itemPrice:
+            return .changeSaleItemPrice
+        case .itemDiscount:
+            return .applySaleDiscount
+        }
+    }
+
+    private var overrideSheet: some View {
+        NavigationStack {
+            Form {
+                if let overrideErrorMessage {
+                    Section {
+                        Text(overrideErrorMessage)
+                            .foregroundStyle(.red)
+                    }
+                }
+
+                Section("Override Required") {
+                    Text("This change needs manager approval.")
+                        .font(.subheadline)
+                    TextField("Approver username/email/badge", text: $overrideApproverIdentifier)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled(true)
+                    SecureField("Approver password", text: $overrideApproverPassword)
+                    TextField("Override reason", text: $overrideReason, axis: .vertical)
+                }
+            }
+            .navigationTitle("Approval")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") {
+                        pendingOverrideAction = nil
+                    }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button {
+                        Task { await requestOverrideApproval() }
+                    } label: {
+                        if isApprovingOverride {
+                            ProgressView()
+                        } else {
+                            Text("Approve")
+                        }
+                    }
+                    .disabled(isApprovingOverride)
+                }
+            }
+        }
     }
 
     private var checkoutSheet: some View {

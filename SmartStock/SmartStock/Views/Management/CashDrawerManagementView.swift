@@ -1,15 +1,15 @@
 //
-//  CustomOrderPreferencesView.swift
+//  CashDrawerManagementView.swift
 //  SmartStock
 //
 
 import SwiftUI
 
-struct CustomOrderPreferencesView: View {
+struct CashDrawerManagementView: View {
     @EnvironmentObject private var sessionManager: SessionManager
 
     var body: some View {
-        CompanyPreferencesView(initialSection: .customOrderDeposit)
+        CompanyPreferencesView(initialSection: .cashDrawers)
             .environmentObject(sessionManager)
     }
 }

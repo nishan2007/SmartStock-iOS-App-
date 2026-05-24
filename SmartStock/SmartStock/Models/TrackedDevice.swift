@@ -17,6 +17,7 @@ struct TrackedDevice: Identifiable, Decodable, Equatable {
     let javaVersion: String?
     let appVersion: String?
     let localUsername: String?
+    let receiptDeviceCode: String?
     let macAddresses: String?
     let firstSeen: Date
     let lastSeen: Date
@@ -50,6 +51,7 @@ struct TrackedDevice: Identifiable, Decodable, Equatable {
         case javaVersion = "java_version"
         case appVersion = "app_version"
         case localUsername = "local_username"
+        case receiptDeviceCode = "receipt_device_code"
         case macAddresses = "mac_addresses"
         case firstSeen = "first_seen"
         case lastSeen = "last_seen"
@@ -76,6 +78,7 @@ struct TrackedDevice: Identifiable, Decodable, Equatable {
         javaVersion: String?,
         appVersion: String?,
         localUsername: String?,
+        receiptDeviceCode: String?,
         macAddresses: String?,
         firstSeen: Date,
         lastSeen: Date,
@@ -99,6 +102,7 @@ struct TrackedDevice: Identifiable, Decodable, Equatable {
         self.javaVersion = javaVersion
         self.appVersion = appVersion
         self.localUsername = localUsername
+        self.receiptDeviceCode = receiptDeviceCode
         self.macAddresses = macAddresses
         self.firstSeen = firstSeen
         self.lastSeen = lastSeen
@@ -126,6 +130,7 @@ struct TrackedDevice: Identifiable, Decodable, Equatable {
         javaVersion = try container.decodeIfPresent(String.self, forKey: .javaVersion)
         appVersion = try container.decodeIfPresent(String.self, forKey: .appVersion)
         localUsername = try container.decodeIfPresent(String.self, forKey: .localUsername)
+        receiptDeviceCode = try container.decodeIfPresent(String.self, forKey: .receiptDeviceCode)
         macAddresses = try container.decodeIfPresent(String.self, forKey: .macAddresses)
         firstSeen = try container.decode(Date.self, forKey: .firstSeen)
         lastSeen = try container.decode(Date.self, forKey: .lastSeen)
@@ -157,6 +162,7 @@ struct TrackedDevice: Identifiable, Decodable, Equatable {
             javaVersion: javaVersion,
             appVersion: appVersion,
             localUsername: localUsername,
+            receiptDeviceCode: receiptDeviceCode,
             macAddresses: macAddresses,
             firstSeen: firstSeen,
             lastSeen: lastSeen,
@@ -184,6 +190,7 @@ struct TrackedDevice: Identifiable, Decodable, Equatable {
             javaVersion: javaVersion,
             appVersion: appVersion,
             localUsername: localUsername,
+            receiptDeviceCode: receiptDeviceCode,
             macAddresses: macAddresses,
             firstSeen: firstSeen,
             lastSeen: lastSeen,

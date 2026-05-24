@@ -162,30 +162,7 @@ struct CustomerDetailView: View {
     }
 
     private var availableCredit: Double {
-        (customerDetails.creditLimit ?? 0) - combinedCurrentBalance
-    }
-
-    private var accountLedgerBalance: Double {
-        customerDetails.currentBalance ?? 0
-    }
-
-    private var customOrderBalanceDue: Double {
-        let chargedCustomOrderIds = Set(
-            transactions.compactMap { transaction -> Int64? in
-                guard transaction.transactionType == "CUSTOM_ORDER_CREDIT" else { return nil }
-                return transaction.customOrderId
-            }
-        )
-
-        return customOrders.reduce(0) { total, order in
-            guard order.paymentStatus != .paid, order.balanceDue > 0 else { return total }
-            guard !chargedCustomOrderIds.contains(order.customOrderId) else { return total }
-            return total + order.balanceDue
-        }
-    }
-
-    private var combinedCurrentBalance: Double {
-        accountLedgerBalance + customOrderBalanceDue
+        (customerDetails.creditLimit ?? 0) - (customerDetails.currentBalance ?? 0)
     }
 
     private var editTrimmedName: String {
@@ -249,9 +226,7 @@ struct CustomerDetailView: View {
                 detailRow(title: "Email", value: email)
             }
 
-            detailRow(title: "Current Balance", value: currency(combinedCurrentBalance))
-            detailRow(title: "Account Ledger Balance", value: currency(accountLedgerBalance))
-            detailRow(title: "Uncharged Custom Order Balance", value: currency(customOrderBalanceDue))
+            detailRow(title: "Current Balance", value: customerDetails.balanceText)
             detailRow(title: "Credit Limit", value: customerDetails.creditLimitText)
             detailRow(title: "Available Credit", value: currency(availableCredit))
             detailRow(title: "Status", value: customerDetails.isActive ? "Active" : "Inactive")
@@ -290,26 +265,30 @@ struct CustomerDetailView: View {
                 )
             } else {
                 ForEach(outstandingItems) { item in
-                    VStack(alignment: .leading, spacing: 6) {
-                        HStack {
-                            Text(item.title)
-                                .font(.headline)
-                            Spacer()
-                            Text(currency(item.balanceDue))
-                                .font(.headline)
-                        }
-
-                        HStack {
-                            if let createdAt = formattedDate(item.createdAt) {
-                                Text(createdAt)
+                    NavigationLink {
+                        outstandingItemDestination(item)
+                    } label: {
+                        VStack(alignment: .leading, spacing: 6) {
+                            HStack {
+                                Text(item.title)
+                                    .font(.headline)
+                                Spacer()
+                                Text(currency(item.balanceDue))
+                                    .font(.headline)
                             }
-                            Spacer()
-                            Text("Total: \(item.totalText)")
+
+                            HStack {
+                                if let createdAt = formattedDate(item.createdAt) {
+                                    Text(createdAt)
+                                }
+                                Spacer()
+                                Text("Total: \(item.totalText)")
+                            }
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                         }
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .padding(.vertical, 4)
                     }
-                    .padding(.vertical, 4)
                 }
             }
         }
@@ -597,13 +576,7 @@ struct CustomerDetailView: View {
         defer { isLoadingActivity = false }
 
         do {
-            async let fetchedSales: [Sale] = supabase
-                .from("sales")
-                .select("sale_id, total_amount, status, transaction_source, created_at, payment_status, returned_amount, receipt_number, receipt_device_id, receipt_sequence, users(full_name), locations(name), customer_accounts(name)")
-                .eq("customer_id", value: customerDetails.customerId)
-                .order("sale_id", ascending: false)
-                .execute()
-                .value
+            async let fetchedSales = CustomerAccountService.fetchSales(customerId: customerDetails.customerId)
             async let fetchedCustomOrders = CustomerAccountService.fetchCustomOrders(customerId: customerDetails.customerId)
             async let fetchedPayments = CustomerAccountService.fetchPaymentHistory(customerId: customerDetails.customerId)
             async let fetchedTransactions = CustomerAccountService.fetchTransactions(customerId: customerDetails.customerId)
@@ -650,22 +623,19 @@ struct CustomerDetailView: View {
         defer { isUpdating = false }
 
         do {
-            _ = try await supabase
-                .from("customer_accounts")
-                .update(
-                    CustomerAccountUpdatePayload(
-                        name: canManageCustomers ? editTrimmedName : customerDetails.name,
-                        accountNumber: canEditAccountNumber ? normalizedValue(editAccountNumber) : customerDetails.accountNumber,
-                        phone: canManageCustomers ? normalizedValue(editPhone) : customerDetails.phone,
-                        email: canManageCustomers ? normalizedValue(editEmail) : customerDetails.email,
-                        accountNotes: canManageCustomers ? normalizedValue(editNotes) : customerDetails.accountNotes,
-                        creditLimit: creditLimit,
-                        isActive: canManageCustomers ? editIsActive : customerDetails.isActive,
-                        isBusiness: canManageCustomers ? editIsBusiness : customerDetails.isBusiness
-                    )
+            try await CustomerAccountService.updateCustomer(
+                customerId: customerDetails.customerId,
+                payload: CustomerAccountUpdatePayload(
+                    name: canManageCustomers ? editTrimmedName : customerDetails.name,
+                    accountNumber: canEditAccountNumber ? normalizedValue(editAccountNumber) : customerDetails.accountNumber,
+                    phone: canManageCustomers ? normalizedValue(editPhone) : customerDetails.phone,
+                    email: canManageCustomers ? normalizedValue(editEmail) : customerDetails.email,
+                    accountNotes: canManageCustomers ? normalizedValue(editNotes) : customerDetails.accountNotes,
+                    creditLimit: creditLimit,
+                    isActive: canManageCustomers ? editIsActive : customerDetails.isActive,
+                    isBusiness: canManageCustomers ? editIsBusiness : customerDetails.isBusiness
                 )
-                .eq("customer_id", value: customerDetails.customerId)
-                .execute()
+            )
 
             customerDetails = CustomerAccount(
                 customerId: customerDetails.customerId,
@@ -722,6 +692,24 @@ struct CustomerDetailView: View {
     }
 
     @ViewBuilder
+    private func outstandingItemDestination(_ item: CustomerOutstandingAccountItem) -> some View {
+        switch item {
+        case .sale(let outstandingSale):
+            if let sale = sales.first(where: { $0.sale_id == outstandingSale.saleId }) {
+                SaleDetailView(sale: sale)
+            } else {
+                CustomerOutstandingItemDetailView(item: item)
+            }
+        case .customOrder(let outstandingOrder):
+            if let order = customOrders.first(where: { $0.customOrderId == outstandingOrder.customOrderId }) {
+                CustomerCustomOrderDetailView(order: order)
+            } else {
+                CustomerOutstandingItemDetailView(item: item)
+            }
+        }
+    }
+
+    @ViewBuilder
     private func detailRow(title: String, value: String) -> some View {
         HStack(alignment: .top) {
             Text(title)
@@ -764,27 +752,5 @@ private enum CustomerAccountDetailSection: String, CaseIterable, Identifiable {
         case .transactions:
             return "Ledger"
         }
-    }
-}
-
-private struct CustomerAccountUpdatePayload: Encodable {
-    let name: String
-    let accountNumber: String?
-    let phone: String?
-    let email: String?
-    let accountNotes: String?
-    let creditLimit: Double
-    let isActive: Bool
-    let isBusiness: Bool
-
-    enum CodingKeys: String, CodingKey {
-        case name
-        case accountNumber = "account_number"
-        case phone
-        case email
-        case accountNotes = "account_notes"
-        case creditLimit = "credit_limit"
-        case isActive = "is_active"
-        case isBusiness = "is_business"
     }
 }

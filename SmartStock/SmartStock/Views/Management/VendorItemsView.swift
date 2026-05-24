@@ -46,7 +46,7 @@ struct VendorItemsView: View {
                     ForEach(items) { item in
                         VStack(alignment: .leading, spacing: 8) {
                             HStack(alignment: .firstTextBaseline) {
-                                Text(item.name)
+                                Text(item.displayName)
                                     .font(.headline)
 
                                 Spacer()
@@ -107,7 +107,7 @@ struct VendorItemsView: View {
         do {
             items = try await supabase
                 .from("products")
-                .select("product_id, name, sku, barcode, cost_price, product_type")
+                .select("product_id, name, size, sku, barcode, cost_price, product_type")
                 .eq("vendor_id", value: vendor.id)
                 .order("name", ascending: true)
                 .execute()
@@ -121,6 +121,7 @@ struct VendorItemsView: View {
 private struct VendorItemRow: Decodable, Identifiable {
     let id: Int
     let name: String
+    let size: String?
     let sku: String?
     let barcode: String?
     let costPrice: Decimal?
@@ -129,6 +130,7 @@ private struct VendorItemRow: Decodable, Identifiable {
     enum CodingKeys: String, CodingKey {
         case id = "product_id"
         case name
+        case size
         case sku
         case barcode
         case costPrice = "cost_price"
@@ -138,6 +140,10 @@ private struct VendorItemRow: Decodable, Identifiable {
     var skuText: String {
         let trimmed = sku?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         return trimmed.isEmpty ? "No SKU" : trimmed
+    }
+
+    var displayName: String {
+        displayProductName(name: name, size: size)
     }
 
     var barcodeText: String? {

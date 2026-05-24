@@ -28,8 +28,9 @@ struct NewSale: Encodable {
     let receipt_number: String
     let receipt_device_id: String
     let receipt_sequence: Int
+    let cash_drawer_id: Int64?
+    let cash_drawer_name: String?
     let device_id: String
-    let device_name: String
     let completed_at: String
 }
 
@@ -70,7 +71,6 @@ struct NewInventoryMovement: Encodable {
     let sale_id: Int
     let sale_item_id: Int
     let device_id: String
-    let device_name: String
 }
 
 // MARK: - Private DTOs (used only in this service)
@@ -106,7 +106,6 @@ private struct NewSaleAuditLog: Encodable {
     let user_id: Int
     let user_name: String
     let device_id: String
-    let device_name: String
     let created_at: String
 }
 
@@ -163,19 +162,23 @@ enum CheckoutService {
         customerAccountId: Int? = nil,
         paymentReference: String? = nil,
         device: TrackedDevice? = nil
-    ) async throws {
+    ) async throws -> ReceiptPrintPayload? {
         
-        guard !cart.isEmpty else { return }
+        guard !cart.isEmpty else { return nil }
         
         let subtotalAmount = cart.reduce(0) { $0 + $1.subtotal }
         let totalDiscountAmount = cart.reduce(0) { $0 + $1.discountAmount }
         let total = max(subtotalAmount - totalDiscountAmount, 0)
         
-        let receipt = await MainActor.run {
-            ReceiptNumberManager.shared.nextReceipt(for: store.id)
-        }
+        let receipt = try await ReceiptNumberManager.shared.nextReceipt(for: store.id)
         let auditTimestamp = ISO8601DateFormatter().string(from: Date())
         let deviceContext = await makeDeviceContext(device: device)
+        let cashDrawer: ResolvedCashDrawer?
+        if paymentMethod == .cash {
+            cashDrawer = try await CashDrawerService().resolveAssignedDrawer(storeId: store.id, deviceId: device?.id)
+        } else {
+            cashDrawer = nil
+        }
         
         let trimmedReference = paymentReference?.trimmingCharacters(in: .whitespacesAndNewlines)
         let resolvedCustomerAccountId: Int?
@@ -252,8 +255,9 @@ enum CheckoutService {
             receipt_number: receipt.receiptNumber,
             receipt_device_id: receipt.deviceId,
             receipt_sequence: receipt.sequence,
+            cash_drawer_id: cashDrawer?.drawerId,
+            cash_drawer_name: cashDrawer?.drawerName,
             device_id: deviceContext.id,
-            device_name: deviceContext.name,
             completed_at: auditTimestamp
         )
         
@@ -286,6 +290,10 @@ enum CheckoutService {
                     sale_id: insertedSale.sale_id,
                     amount: total,
                     transaction_type: transactionType,
+                    payment_method: paymentMethod.rawValue,
+                    payment_reference: resolvedPaymentReference,
+                    cash_drawer_id: cashDrawer?.drawerId,
+                    cash_drawer_name: cashDrawer?.drawerName,
                     note: note,
                     user_name: user.fullName,
                     device_id: deviceContext.id,
@@ -362,15 +370,15 @@ enum CheckoutService {
             let insertedSaleItem = saleItemRows.removeFirst()
             insertedSaleItemByProduct[item.product.id] = saleItemRows
 
-            auditRows.append(audit(saleId: insertedSale.sale_id, saleItemId: insertedSaleItem.sale_item_id, customerId: resolvedCustomerAccountId, productId: item.product.id, locationId: store.id, actionType: "SALE_ITEM_ADDED", actionScope: "SALE_ITEM", amount: item.lineTotal, quantity: item.quantity, note: item.product.name, user: user, deviceContext: deviceContext, createdAt: auditTimestamp))
+            auditRows.append(audit(saleId: insertedSale.sale_id, saleItemId: insertedSaleItem.sale_item_id, customerId: resolvedCustomerAccountId, productId: item.product.id, locationId: store.id, actionType: "SALE_ITEM_ADDED", actionScope: "SALE_ITEM", amount: item.lineTotal, quantity: item.quantity, note: item.product.displayName, user: user, deviceContext: deviceContext, createdAt: auditTimestamp))
 
             let originalPrice = item.product.price ?? 0
             if abs(item.unitPrice - originalPrice) > 0.0001 {
-                auditRows.append(audit(saleId: insertedSale.sale_id, saleItemId: insertedSaleItem.sale_item_id, customerId: resolvedCustomerAccountId, productId: item.product.id, locationId: store.id, actionType: "PRICE_OVERRIDE", actionScope: "SALE_ITEM", fieldName: "unit_price", oldValue: String(originalPrice), newValue: String(item.unitPrice), amount: item.unitPrice, quantity: item.quantity, note: item.product.name, user: user, deviceContext: deviceContext, createdAt: auditTimestamp))
+                auditRows.append(audit(saleId: insertedSale.sale_id, saleItemId: insertedSaleItem.sale_item_id, customerId: resolvedCustomerAccountId, productId: item.product.id, locationId: store.id, actionType: "PRICE_OVERRIDE", actionScope: "SALE_ITEM", fieldName: "unit_price", oldValue: String(originalPrice), newValue: String(item.unitPrice), amount: item.unitPrice, quantity: item.quantity, note: item.product.displayName, user: user, deviceContext: deviceContext, createdAt: auditTimestamp))
             }
 
             if item.discountAmount > 0 {
-                auditRows.append(audit(saleId: insertedSale.sale_id, saleItemId: insertedSaleItem.sale_item_id, customerId: resolvedCustomerAccountId, productId: item.product.id, locationId: store.id, actionType: "ITEM_DISCOUNT_APPLIED", actionScope: "SALE_ITEM", fieldName: "discount_amount", oldValue: "0", newValue: String(item.discountAmount), amount: item.discountAmount, quantity: item.quantity, note: item.product.name, user: user, deviceContext: deviceContext, createdAt: auditTimestamp))
+                auditRows.append(audit(saleId: insertedSale.sale_id, saleItemId: insertedSaleItem.sale_item_id, customerId: resolvedCustomerAccountId, productId: item.product.id, locationId: store.id, actionType: "ITEM_DISCOUNT_APPLIED", actionScope: "SALE_ITEM", fieldName: "discount_amount", oldValue: "0", newValue: String(item.discountAmount), amount: item.discountAmount, quantity: item.quantity, note: item.product.displayName, user: user, deviceContext: deviceContext, createdAt: auditTimestamp))
             }
 
             let inventoryRows: [InventoryRow] = try await supabase
@@ -404,8 +412,7 @@ enum CheckoutService {
                     user_id: user.id,
                     sale_id: insertedSale.sale_id,
                     sale_item_id: insertedSaleItem.sale_item_id,
-                    device_id: deviceContext.id,
-                    device_name: deviceContext.name
+                    device_id: deviceContext.id
                 ))
                 .execute()
 
@@ -413,6 +420,33 @@ enum CheckoutService {
         }
 
         try await insertAuditRows(auditRows)
+
+        return ReceiptPrintPayload(
+            saleId: insertedSale.sale_id,
+            receiptNumber: receipt.receiptNumber,
+            date: Date(),
+            cashierName: user.fullName,
+            deviceId: receipt.deviceId,
+            customerName: nil,
+            storeName: store.name,
+            paymentMethod: paymentMethod.rawValue,
+            paymentStatus: paymentStatus,
+            amountPaid: amountPaid,
+            cashCollected: nil,
+            changeDue: nil,
+            subtotal: subtotalAmount,
+            discountAmount: totalDiscountAmount,
+            total: total,
+            items: cart.map {
+                ReceiptPrintLineItem(
+                    name: $0.product.displayName,
+                    sku: $0.product.sku,
+                    quantity: $0.quantity,
+                    unitPrice: $0.unitPrice,
+                    discountAmount: $0.discountAmount
+                )
+            }
+        )
     }
 
     private static func insertAuditRows(_ rows: [NewSaleAuditLog]) async throws {
@@ -421,9 +455,7 @@ enum CheckoutService {
     }
 
     private static func makeDeviceContext(device: TrackedDevice?) async -> (id: String, name: String) {
-        let fallbackDeviceName = await MainActor.run {
-            ReceiptNumberManager.shared.currentDeviceId()
-        }
+        let fallbackDeviceName = "UNKNOWN-DEVICE"
         let trimmedDeviceName = device?.deviceName?.trimmingCharacters(in: .whitespacesAndNewlines)
         let trimmedModelName = device?.modelName.trimmingCharacters(in: .whitespacesAndNewlines)
 
@@ -474,7 +506,6 @@ enum CheckoutService {
             user_id: user.id,
             user_name: user.fullName,
             device_id: deviceContext.id,
-            device_name: deviceContext.name,
             created_at: createdAt
         )
     }

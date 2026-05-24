@@ -8,30 +8,29 @@ import SwiftUI
 struct DeviceReceiptSettingsView: View {
     @EnvironmentObject private var sessionManager: SessionManager
 
-    @State private var deviceName = ""
-    @State private var savedDeviceName = ""
+    @State private var deviceCode = ""
+    @State private var savedDeviceCode = ""
     @State private var isSaving = false
     @State private var errorMessage: String?
     @State private var successMessage: String?
 
     var body: some View {
         Form {
-            Section("Receipt Device Name") {
-                TextField("e.g. Front Register", text: $deviceName)
-                    .textInputAutocapitalization(.words)
-                    .autocorrectionDisabled(true)
+            Section("Receipt Device Code") {
+                TextField("0001", text: $deviceCode)
+                    .keyboardType(.numberPad)
 
-                LabeledContent("Saved Name", value: savedDeviceName.isEmpty ? "—" : savedDeviceName)
-                LabeledContent("Receipt ID Preview", value: previewDeviceId)
+                LabeledContent("Saved Code", value: savedDeviceCode.isEmpty ? "—" : savedDeviceCode)
+                LabeledContent("Code Preview", value: previewDeviceCode)
 
                 if let store = sessionManager.selectedStore {
                     LabeledContent(
                         "Next Receipt Preview",
-                        value: "R-\(String(format: "S%03d", store.id))-\(previewDeviceId)-000001"
+                        value: "\(store.receiptStoreCode ?? "0001")-\(previewDeviceCode)-000001"
                     )
                 }
 
-                Text("This name is stored on the device and used in future receipt numbers for this iPhone or iPad.")
+                Text("This code is stored in Devices and used in future receipt numbers for this register.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }
@@ -60,11 +59,11 @@ struct DeviceReceiptSettingsView: View {
                         ProgressView()
                             .frame(maxWidth: .infinity)
                     } else {
-                        Text("Save Device Name")
+                        Text("Save Device Code")
                             .frame(maxWidth: .infinity)
                     }
                 }
-                .disabled(isSaving || previewDeviceId.isEmpty)
+                .disabled(isSaving || previewDeviceCode.isEmpty || sessionManager.currentDevice == nil)
             }
         }
         .navigationTitle("Receipt Device")
@@ -73,16 +72,14 @@ struct DeviceReceiptSettingsView: View {
         }
     }
 
-    private var previewDeviceId: String {
-        ReceiptNumberManager.shared.previewSanitizedDeviceId(deviceName)
+    private var previewDeviceCode: String {
+        sanitizeCode(deviceCode)
     }
 
     private func loadCurrentValue() async {
-        let current = await MainActor.run {
-            ReceiptNumberManager.shared.currentDeviceId()
-        }
-        deviceName = current
-        savedDeviceName = current
+        let current = sessionManager.currentDevice?.receiptDeviceCode ?? ""
+        deviceCode = current
+        savedDeviceCode = current
     }
 
     private func save() async {
@@ -92,23 +89,30 @@ struct DeviceReceiptSettingsView: View {
         defer { isSaving = false }
 
         do {
-            let updated = try await MainActor.run {
-                try ReceiptNumberManager.shared.updateDeviceId(deviceName)
+            guard let deviceId = sessionManager.currentDevice?.id else {
+                throw ReceiptNumberManagerError.missingDeviceCode
             }
-            deviceName = updated
-            savedDeviceName = updated
-
-            if let deviceId = sessionManager.currentDevice?.id {
-                let updatedDevice = try await DeviceService.shared.updateCurrentDeviceLocalUsername(
-                    deviceId: deviceId,
-                    localUsername: updated
-                )
-                sessionManager.handleTrackedDeviceUpdate(updatedDevice)
+            let normalized = sanitizeCode(deviceCode)
+            guard !normalized.isEmpty else {
+                throw ReceiptNumberManagerError.missingDeviceCode
             }
 
-            successMessage = "Device receipt name saved."
+            let updatedDevice = try await DeviceService.shared.updateDeviceReceiptCode(
+                deviceId: deviceId,
+                receiptDeviceCode: normalized
+            )
+            sessionManager.handleTrackedDeviceUpdate(updatedDevice)
+            deviceCode = normalized
+            savedDeviceCode = normalized
+            successMessage = "Device receipt code saved."
         } catch {
             errorMessage = error.localizedDescription
         }
+    }
+
+    private func sanitizeCode(_ value: String) -> String {
+        let digits = value.replacingOccurrences(of: "\\D+", with: "", options: .regularExpression)
+        guard let parsed = Int(digits), parsed > 0 else { return "" }
+        return String(format: "%04d", min(parsed, 9999))
     }
 }

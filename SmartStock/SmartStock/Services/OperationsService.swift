@@ -18,7 +18,7 @@ struct OperationsService {
 
         let rows: [ScannedProduct] = try await client
             .from("products")
-            .select("product_id, name, sku, barcode, product_type")
+            .select("product_id, name, size, sku, barcode, product_type")
             .eq("product_id", value: productId)
             .limit(1)
             .execute()
@@ -37,8 +37,8 @@ struct OperationsService {
 
         let rows: [ScannedProduct] = try await client
             .from("products")
-            .select("product_id, name, sku, barcode, product_type")
-            .or("name.ilike.%\(trimmedQuery)%,sku.ilike.%\(trimmedQuery)%")
+            .select("product_id, name, size, sku, barcode, product_type")
+            .or("name.ilike.%\(trimmedQuery)%,size.ilike.%\(trimmedQuery)%,sku.ilike.%\(trimmedQuery)%")
             .order("name", ascending: true)
             .limit(1)
             .execute()
@@ -61,7 +61,7 @@ struct OperationsService {
             items: [
                 ReceiveInventoryItem(
                     productId: product.id,
-                    productName: product.name,
+                    productName: product.displayName,
                     quantity: quantity
                 )
             ],
@@ -88,9 +88,7 @@ struct OperationsService {
             throw OperationsServiceError.invalidQuantity
         }
 
-        let receiveNumber = await MainActor.run {
-            ReceiptNumberManager.shared.nextReceive(for: store.id)
-        }
+        let receiveNumber = try await ReceiptNumberManager.shared.nextReceive(for: store.id)
 
         let receiveBatch = NewReceivingBatch(
             receive_id: receiveNumber.receiveId,
@@ -175,7 +173,7 @@ struct OperationsService {
             items: [
                 StoreTransferCreateItem(
                     productId: product.id,
-                    productName: product.name,
+                    productName: product.displayName,
                     quantity: quantity
                 )
             ],
@@ -288,7 +286,7 @@ struct OperationsService {
         for row in transferRows {
             let itemRows: [IncomingStoreTransferItemRow] = try await client
                 .from("store_transfer_items")
-                .select("transfer_item_id, product_id, quantity, product:products(name, sku)")
+                .select("transfer_item_id, product_id, quantity, product:products(name, size, sku)")
                 .eq("transfer_id", value: Int(row.transfer_id))
                 .order("transfer_item_id", ascending: true)
                 .execute()
@@ -298,7 +296,7 @@ struct OperationsService {
                 IncomingStoreTransferItem(
                     transferItemId: $0.transfer_item_id,
                     productId: $0.product_id,
-                    productName: $0.product?.name ?? "Unknown Product",
+                    productName: $0.product?.displayName ?? "Unknown Product",
                     sku: $0.product?.sku,
                     quantity: $0.quantity
                 )
@@ -380,9 +378,7 @@ struct OperationsService {
             throw OperationsServiceError.transferQuantityVerificationPermissionRequired
         }
 
-        let receiveNumber = await MainActor.run {
-            ReceiptNumberManager.shared.nextReceive(for: receivingStore.id)
-        }
+        let receiveNumber = try await ReceiptNumberManager.shared.nextReceive(for: receivingStore.id)
 
         let receiveBatch = NewReceivingBatch(
             receive_id: receiveNumber.receiveId,
@@ -531,7 +527,7 @@ struct OperationsService {
 
         let items: [ReturnableSaleItem] = try await client
             .from("sale_items")
-            .select("sale_item_id, sale_id, product_id, quantity, unit_price, products(name), sale_return_items(quantity)")
+            .select("sale_item_id, sale_id, product_id, quantity, unit_price, products(name, size), sale_return_items(quantity)")
             .eq("sale_id", value: sale.sale_id)
             .eq("product_id", value: productId)
             .execute()
@@ -560,7 +556,7 @@ struct OperationsService {
     func fetchReturnableItems(for saleId: Int) async throws -> [ReturnableSaleItem] {
         try await client
             .from("sale_items")
-            .select("sale_item_id, sale_id, product_id, quantity, unit_price, products(name, image_url), sale_return_items(quantity)")
+            .select("sale_item_id, sale_id, product_id, quantity, unit_price, products(name, size, image_url), sale_return_items(quantity)")
             .eq("sale_id", value: saleId)
             .order("sale_item_id", ascending: true)
             .execute()
@@ -807,7 +803,7 @@ struct OperationsService {
         return entry
     }
 
-    func fetchEndOfDayReport(storeId: Int, for date: Date = Date()) async throws -> EndOfDayReport {
+    func fetchEndOfDayReport(storeId: Int, cashDrawerId: Int64? = nil, for date: Date = Date()) async throws -> EndOfDayReport {
         let calendar = Calendar.current
         let startOfDay = calendar.startOfDay(for: date)
         guard let endOfDay = calendar.date(byAdding: .day, value: 1, to: startOfDay) else {
@@ -818,12 +814,18 @@ struct OperationsService {
         let startValue = iso.string(from: startOfDay)
         let endValue = iso.string(from: endOfDay)
 
-        let sales: [EndOfDaySaleRow] = try await client
+        var salesQuery = client
             .from("sales")
-            .select("sale_id, receipt_number, created_at, payment_method, payment_status, amount_paid, discount_amount, total_amount, user_name, receipt_device_id")
+            .select("sale_id, receipt_number, created_at, payment_method, payment_status, amount_paid, discount_amount, total_amount, user_name, receipt_device_id, cash_drawer_id, cash_drawer_name")
             .eq("location_id", value: storeId)
             .gte("created_at", value: startValue)
             .lt("created_at", value: endValue)
+
+        if let cashDrawerId {
+            salesQuery = salesQuery.eq("cash_drawer_id", value: String(cashDrawerId))
+        }
+
+        let sales: [EndOfDaySaleRow] = try await salesQuery
             .order("created_at", ascending: true)
             .execute()
             .value
@@ -837,13 +839,19 @@ struct OperationsService {
             .execute()
             .value
 
-        let customerPayments: [EndOfDayCustomerPaymentRow] = try await client
+        var customerPaymentsQuery = client
             .from("customer_account_transactions")
-            .select("transaction_id, payment_id, amount, note, created_at, user_name, customer_accounts(name)")
+            .select("transaction_id, payment_id, amount, note, payment_method, payment_reference, cash_drawer_id, cash_drawer_name, created_at, user_name, customer_accounts(name)")
             .eq("transaction_type", value: "PAYMENT")
             .eq("location_id", value: storeId)
             .gte("created_at", value: startValue)
             .lt("created_at", value: endValue)
+
+        if let cashDrawerId {
+            customerPaymentsQuery = customerPaymentsQuery.eq("cash_drawer_id", value: String(cashDrawerId))
+        }
+
+        let customerPayments: [EndOfDayCustomerPaymentRow] = try await customerPaymentsQuery
             .order("created_at", ascending: true)
             .execute()
             .value
@@ -876,7 +884,9 @@ struct OperationsService {
             }
         }
 
-        let customerPaymentCash = customerPayments.reduce(0.0) { $0 + abs($1.amount ?? 0) }
+        let customerPaymentCash = customerPayments
+            .filter { ($0.payment_method ?? "").uppercased() == "CASH" }
+            .reduce(0.0) { $0 + abs($1.amount ?? 0) }
         cash += customerPaymentCash
         paid += customerPaymentCash
 
@@ -997,9 +1007,7 @@ struct OperationsService {
     }
 
     private func makeDeviceContext(device: TrackedDevice?) async -> (id: String, name: String) {
-        let fallbackDeviceName = await MainActor.run {
-            ReceiptNumberManager.shared.currentDeviceId()
-        }
+        let fallbackDeviceName = "UNKNOWN-DEVICE"
         let trimmedDeviceName = device?.deviceName?.trimmingCharacters(in: .whitespacesAndNewlines)
         let trimmedModelName = device?.modelName.trimmingCharacters(in: .whitespacesAndNewlines)
 
@@ -1140,13 +1148,19 @@ enum OperationsServiceError: LocalizedError {
 struct ScannedProduct: Decodable {
     let id: Int
     let name: String
+    let size: String?
     let sku: String?
     let barcode: String?
     let productType: String?
 
+    var displayName: String {
+        displayProductName(name: name, size: size)
+    }
+
     enum CodingKeys: String, CodingKey {
         case id = "product_id"
         case name
+        case size
         case sku
         case barcode
         case productType = "product_type"
@@ -1247,6 +1261,8 @@ struct EndOfDaySaleRow: Decodable, Identifiable {
     let total_amount: Double?
     let user_name: String?
     let receipt_device_id: String?
+    let cash_drawer_id: Int64?
+    let cash_drawer_name: String?
 
     var id: Int { sale_id }
 
@@ -1270,6 +1286,11 @@ struct EndOfDaySaleRow: Decodable, Identifiable {
     var deviceText: String {
         let trimmed = receipt_device_id?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         return trimmed.isEmpty ? "Unknown Device" : trimmed
+    }
+
+    var drawerText: String {
+        let trimmed = cash_drawer_name?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return trimmed.isEmpty ? "No drawer" : trimmed
     }
 
     var amountPaidText: String {
@@ -1303,6 +1324,10 @@ struct EndOfDayCustomerPaymentRow: Decodable, Identifiable {
     let payment_id: String?
     let amount: Double?
     let note: String?
+    let payment_method: String?
+    let payment_reference: String?
+    let cash_drawer_id: Int64?
+    let cash_drawer_name: String?
     let created_at: String?
     let user_name: String?
     let customer_accounts: EndOfDayCustomerPaymentAccount?
@@ -1322,6 +1347,16 @@ struct EndOfDayCustomerPaymentRow: Decodable, Identifiable {
     var employeeText: String {
         let trimmed = user_name?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         return trimmed.isEmpty ? "Unknown" : trimmed
+    }
+
+    var paymentMethodText: String {
+        let trimmed = payment_method?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return trimmed.isEmpty ? "Unknown Payment" : trimmed
+    }
+
+    var drawerText: String {
+        let trimmed = cash_drawer_name?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return trimmed.isEmpty ? "No drawer" : trimmed
     }
 
     var createdAtText: String {
@@ -1475,7 +1510,12 @@ private struct IncomingStoreTransferItemRow: Decodable {
 
 private struct TransferProductSummary: Decodable {
     let name: String?
+    let size: String?
     let sku: String?
+
+    var displayName: String {
+        displayProductName(name: name ?? "Unknown Product", size: size)
+    }
 }
 
 private struct StoreTransferReceiveRow: Decodable {
@@ -1519,6 +1559,7 @@ struct ReturnLookupSale: Decodable {
 
 struct ReturnableProductSummary: Decodable {
     let name: String?
+    let size: String?
     let image_url: String?
 }
 
@@ -1538,7 +1579,7 @@ struct ReturnableSaleItem: Decodable {
     var id: Int { sale_item_id }
 
     var productName: String {
-        products?.name ?? "Unknown Product"
+        displayProductName(name: products?.name ?? "Unknown Product", size: products?.size)
     }
 
     var imageURL: URL? {

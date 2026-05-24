@@ -34,6 +34,7 @@ struct LocationWritePayload: Encodable {
 
 struct ReceivingHistoryProduct: Decodable {
     let name: String?
+    let size: String?
 }
 
 struct ReceivingHistoryLocation: Decodable {
@@ -63,7 +64,7 @@ struct ReceivingHistoryRow: Decodable, Identifiable {
         case locations
     }
 
-    var productName: String { products?.name ?? "Unknown Product" }
+    var productName: String { displayProductName(name: products?.name ?? "Unknown Product", size: products?.size) }
     var storeName: String { locations?.name ?? "Unknown Store" }
     var quantityText: String { changeQty > 0 ? "+\(changeQty)" : "\(changeQty)" }
 

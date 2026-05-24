@@ -20,8 +20,8 @@ final class InventoryViewModel: ObservableObject {
 
     private let service: InventoryService
 
-    init(service: InventoryService = InventoryService()) {
-        self.service = service
+    init(service: InventoryService? = nil) {
+        self.service = service ?? InventoryService()
     }
 
     var filteredItems: [InventoryItem] {
@@ -35,6 +35,7 @@ final class InventoryViewModel: ObservableObject {
                 } else {
                     let query = trimmed.lowercased()
                     matchesSearch = item.name.lowercased().contains(query)
+                        || (item.size?.lowercased().contains(query) ?? false)
                         || item.sku.lowercased().contains(query)
                         || item.quantityText.contains(query)
                         || item.reorderLevelText.contains(query)
@@ -58,7 +59,7 @@ final class InventoryViewModel: ObservableObject {
                 if lhs.status != rhs.status {
                     return statusSortOrder(lhs.status) < statusSortOrder(rhs.status)
                 }
-                return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
+                return lhs.displayName.localizedCaseInsensitiveCompare(rhs.displayName) == .orderedAscending
             }
     }
 

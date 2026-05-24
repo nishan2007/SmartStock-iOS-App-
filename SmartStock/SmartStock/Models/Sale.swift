@@ -26,13 +26,16 @@ struct SaleItemSummary: Decodable {
 
 struct Sale: Decodable, Identifiable {
     let sale_id: Int
+    let subtotal_amount: Double?
     let total_amount: Double?
+    let discount_amount: Double?
     let status: String?
     let payment_method: String?
     let payment_reference: String?
     let transaction_source: String?
     let created_at: String?
     let payment_status: String?
+    let amount_paid: Double?
     let returned_amount: Double?
     let receipt_number: String?
     let receipt_device_id: String?
@@ -174,6 +177,8 @@ struct Sale: Decodable, Identifiable {
 
 struct SaleItemProduct: Decodable {
     let name: String?
+    let size: String?
+    let sku: String?
 }
 
 struct SaleItem: Decodable, Identifiable {
@@ -185,7 +190,11 @@ struct SaleItem: Decodable, Identifiable {
     var id: Int { sale_item_id }
 
     var productName: String {
-        products?.name ?? "Unknown Product"
+        displayProductName(name: products?.name ?? "Unknown Product", size: products?.size)
+    }
+
+    var productSku: String? {
+        products?.sku
     }
 
     var unitPriceText: String {

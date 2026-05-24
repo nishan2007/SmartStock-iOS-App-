@@ -28,6 +28,7 @@ struct VendorLookupOption: Decodable, Identifiable, Hashable {
 struct InventoryItemDraft {
     var productId: Int?
     var name = ""
+    var size = ""
     var sku = ""
     var barcode = ""
     var description = ""
@@ -51,6 +52,7 @@ struct InventoryItemDraft {
     init(item: InventoryItem) {
         productId = item.productId
         name = item.name
+        size = item.size ?? ""
         sku = item.sku
         barcode = item.barcode ?? ""
         description = item.itemDescription ?? ""

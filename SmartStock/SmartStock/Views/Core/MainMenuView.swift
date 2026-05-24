@@ -572,16 +572,16 @@ struct MainMenuView: View {
     }
 
     private var loginSecurityReceiptDeviceName: String {
-        if let localUsername = sessionManager.currentDevice?.localUsername?.trimmingCharacters(in: .whitespacesAndNewlines),
-           !localUsername.isEmpty {
-            return localUsername
+        if let receiptCode = sessionManager.currentDevice?.receiptDeviceCode?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !receiptCode.isEmpty {
+            return receiptCode
         }
 
         return receiptDeviceName.isEmpty ? "Not set" : receiptDeviceName
     }
 
     private func loadReceiptDeviceName() {
-        receiptDeviceName = ReceiptNumberManager.shared.currentDeviceId()
+        receiptDeviceName = sessionManager.currentDevice?.receiptDeviceCode?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
     }
 
     private func menuTile(title: String, subtitle: String, systemImage: String, tint: Color) -> some View {

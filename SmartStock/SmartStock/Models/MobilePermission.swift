@@ -11,6 +11,7 @@ enum MobilePermission: String, CaseIterable, Identifiable, Codable, Hashable {
     case applySaleDiscount = "apply_sale_discount"
     case changeSaleItemPrice = "change_sale_item_price"
     case changeStore = "change_store"
+    case cashDrawerManagement = "cash_drawer_management"
     case companyPreferences = "company_preferences"
     case createCustomOrder = "create_custom_order"
     case customOrderCancel = "custom_order_cancel"
@@ -80,6 +81,8 @@ enum MobilePermission: String, CaseIterable, Identifiable, Codable, Hashable {
             return "Change Sale Item Price"
         case .changeStore:
             return "Change Store"
+        case .cashDrawerManagement:
+            return "Cash Drawer Management"
         case .companyPreferences:
             return "Company Preferences"
         case .createCustomOrder:
@@ -193,7 +196,7 @@ enum MobilePermission: String, CaseIterable, Identifiable, Codable, Hashable {
 
     var groupTitle: String {
         switch self {
-        case .makeSale, .viewSales, .returns, .endOfDay, .customers, .manageCustomers, .editCustomerCreditLimit, .editAccountNumber, .applySaleDiscount, .changeSaleItemPrice, .viewSaleAudit, .exportSaleAudit, .createCustomOrder, .manageCustomOrders, .viewAssignedCustomOrders, .ordersManagerDashboard, .ordersEndOfDay, .customOrderRefunds, .customOrderLineReturns, .customOrderLineDelivery, .customOrderLineDiscount, .customOrderDepositOverride, .customOrderRefundApproval, .customOrderProductionSteps, .customOrderCancel, .customOrderOverrides:
+        case .makeSale, .viewSales, .returns, .endOfDay, .customers, .manageCustomers, .editCustomerCreditLimit, .editAccountNumber, .applySaleDiscount, .changeSaleItemPrice, .viewSaleAudit, .exportSaleAudit, .createCustomOrder, .manageCustomOrders, .viewAssignedCustomOrders, .ordersManagerDashboard, .ordersEndOfDay, .customOrderRefunds, .customOrderLineReturns, .customOrderLineDelivery, .customOrderLineDiscount, .customOrderDepositOverride, .customOrderRefundApproval, .customOrderProductionSteps, .customOrderCancel, .customOrderOverrides, .cashDrawerManagement:
             return "Sales"
         case .inventory, .receiving, .storeTransfer, .verifyStoreTransferQuantity, .editItem, .addNewItem, .adjustInventoryQuantity, .viewCostPrice, .viewAllStoresInventory, .viewItemDetails, .viewCreatedBy, .departmentManagement, .vendorManagement, .viewVendor, .viewReceivingHistory, .maintenanceManagement, .machineManagement, .partsManagement, .customOrderItems, .customOrderPrintMaterials:
             return "Inventory"

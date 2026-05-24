@@ -13,6 +13,10 @@ struct EndOfDayView: View {
     @State private var report: EndOfDayReport?
     @State private var isLoading = true
     @State private var errorMessage: String?
+    @State private var selectedDate = Date()
+    @State private var drawers: [CashDrawer] = []
+    @State private var selectedDrawerId: Int64?
+    @State private var currentDrawer: ResolvedCashDrawer?
     
     // MARK: - Cash Drawer Data
     private let denomValues: [Double] = [5000, 2000, 1000, 500, 100, 50, 20]
@@ -143,7 +147,16 @@ struct EndOfDayView: View {
         Form {
             Section("Store") {
                 Label(sessionManager.selectedStore?.name ?? "No store selected", systemImage: "storefront")
-                Label(Date.now.formatted(date: .abbreviated, time: .shortened), systemImage: "clock")
+                DatePicker("Business Day", selection: $selectedDate, displayedComponents: .date)
+                dayPickerControls
+                Label(selectedDate.formatted(date: .abbreviated, time: .omitted), systemImage: "calendar")
+                LabeledContent("Current Drawer", value: currentDrawer?.drawerName ?? "No drawer assigned")
+                Picker("Drawer Filter", selection: $selectedDrawerId) {
+                    Text("All Drawers").tag(nil as Int64?)
+                    ForEach(drawers.filter(\.isActive)) { drawer in
+                        Text(drawer.displayName).tag(Optional(drawer.drawerId))
+                    }
+                }
             }
             
             if let errorMessage {
@@ -221,6 +234,10 @@ struct EndOfDayView: View {
                             Text("\(sale.employeeText) • \(sale.deviceText)")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
+
+                            Text("Drawer: \(sale.drawerText)")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
                             
                             HStack {
                                 Text(sale.payment_method ?? "Unknown Payment")
@@ -235,7 +252,7 @@ struct EndOfDayView: View {
                         .padding(.vertical, 4)
                     }
                 } else if !isLoading {
-                    Text("No sales found for today.")
+                    Text("No sales found for this day.")
                         .foregroundStyle(.secondary)
                 }
             }
@@ -259,11 +276,15 @@ struct EndOfDayView: View {
                             Text("\(payment.createdAtText) • \(payment.employeeText)")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
+
+                            Text("\(payment.paymentMethodText) • Drawer: \(payment.drawerText)")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
                         }
                         .padding(.vertical, 4)
                     }
                 } else if !isLoading {
-                    Text("No customer account payments found for today.")
+                    Text("No customer account payments found for this day.")
                         .foregroundStyle(.secondary)
                 }
             }
@@ -273,6 +294,7 @@ struct EndOfDayView: View {
             await loadReport()
         }
         .task {
+            await loadDrawerContext()
             await loadReport()
         }
         // MARK: - Cash Drawer Modal (unchanged - clean totals at bottom)
@@ -362,11 +384,17 @@ struct EndOfDayView: View {
         .onDisappear {
             saveCashData()
         }
-        .onChange(of: countedQtys) { _ in
+        .onChange(of: countedQtys) { _, _ in
             saveCashData()
         }
-        .onChange(of: notes) { _ in
+        .onChange(of: notes) { _, _ in
             saveCashData()
+        }
+        .onChange(of: selectedDate) { _, _ in
+            Task { await loadReport() }
+        }
+        .onChange(of: selectedDrawerId) { _, _ in
+            Task { await loadReport() }
         }
     }
     
@@ -385,6 +413,40 @@ struct EndOfDayView: View {
             notes = savedNotes
         }
     }
+
+    private var dayPickerControls: some View {
+        HStack {
+            Button {
+                moveSelectedDate(by: -1)
+            } label: {
+                Label("Previous Day", systemImage: "chevron.left")
+            }
+            .labelStyle(.iconOnly)
+
+            Spacer()
+
+            Button("Yesterday") {
+                selectedDate = Calendar.current.date(byAdding: .day, value: -1, to: Calendar.current.startOfDay(for: Date())) ?? Date()
+            }
+
+            Button("Today") {
+                selectedDate = Date()
+            }
+
+            Spacer()
+
+            Button {
+                moveSelectedDate(by: 1)
+            } label: {
+                Label("Next Day", systemImage: "chevron.right")
+            }
+            .labelStyle(.iconOnly)
+        }
+    }
+
+    private func moveSelectedDate(by days: Int) {
+        selectedDate = Calendar.current.date(byAdding: .day, value: days, to: selectedDate) ?? selectedDate
+    }
     
     private func loadReport() async {
         guard let store = sessionManager.selectedStore else {
@@ -398,9 +460,31 @@ struct EndOfDayView: View {
         defer { isLoading = false }
         
         do {
-            report = try await service.fetchEndOfDayReport(storeId: store.id)
+            report = try await service.fetchEndOfDayReport(storeId: store.id, cashDrawerId: selectedDrawerId, for: selectedDate)
         } catch {
             errorMessage = error.localizedDescription
+        }
+    }
+
+    private func loadDrawerContext() async {
+        guard let store = sessionManager.selectedStore else {
+            drawers = []
+            currentDrawer = nil
+            selectedDrawerId = nil
+            return
+        }
+
+        do {
+            async let loadedDrawers = CashDrawerService().fetchDrawers(storeId: store.id, includeInactive: false)
+            async let loadedCurrent = try? CashDrawerService().resolveAssignedDrawer(storeId: store.id, deviceId: sessionManager.currentDevice?.id)
+            drawers = try await loadedDrawers
+            currentDrawer = await loadedCurrent
+            if let selectedDrawerId, !drawers.contains(where: { $0.drawerId == selectedDrawerId }) {
+                self.selectedDrawerId = nil
+            }
+        } catch {
+            drawers = []
+            currentDrawer = nil
         }
     }
     

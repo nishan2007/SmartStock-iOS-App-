@@ -147,12 +147,7 @@ struct CustomersView: View {
         defer { isLoading = false }
 
         do {
-            customers = try await supabase
-                .from("customer_accounts")
-                .select("customer_id, account_number, name, phone, email, credit_limit, current_balance, is_active, is_business, account_notes, customer_type_id, created_at")
-                .order("name", ascending: true)
-                .execute()
-                .value
+            customers = try await CustomerAccountService.fetchCustomers()
         } catch {
             print("LOAD CUSTOMERS ERROR:", error)
             errorMessage = error.localizedDescription
@@ -174,18 +169,15 @@ struct CustomersView: View {
         defer { isSaving = false }
 
         do {
-            _ = try await supabase
-                .from("customer_accounts")
-                .insert(
-                    NewCustomerAccount(
-                        name: trimmedName,
-                        phone: trimmedPhone,
-                        email: trimmedEmail,
-                        isActive: true,
-                        isBusiness: false
-                    )
+            try await CustomerAccountService.createCustomer(
+                NewCustomerAccount(
+                    name: trimmedName,
+                    phone: trimmedPhone,
+                    email: trimmedEmail,
+                    isActive: true,
+                    isBusiness: false
                 )
-                .execute()
+            )
 
             name = ""
             phone = ""
